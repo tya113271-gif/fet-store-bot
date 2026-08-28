@@ -1,0 +1,284 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>FET STORE - Bot Dashboard</title>
+    <link rel="stylesheet" href="/static/css/style.css">
+    <link href="https://fonts.googleapis.com/css2?family=Cairo:wght@400;600;700;800;900&family=Rajdhani:wght@600;700&display=swap" rel="stylesheet">
+</head>
+<body>
+    <!-- Top Header -->
+    <header class="dashboard-header">
+        <div class="header-brand">
+            <img src="/static/img/logo.png" alt="FET STORE Logo" class="brand-logo">
+            <div class="brand-text">
+                <h1>FET <span class="accent">STORE</span></h1>
+                <p>لوحة التحكم بالبوت ونظام التكتات والتحديثات</p>
+            </div>
+        </div>
+        <div class="header-status">
+            <div class="status-indicator" id="bot-status-badge">
+                <span class="status-dot offline"></span>
+                <span class="status-text" id="bot-status-text">جاري فحص الاتصال...</span>
+            </div>
+            <div class="bot-info-card hidden" id="bot-profile-card">
+                <img src="/static/img/logo.png" id="bot-avatar" class="bot-avatar">
+                <span class="bot-tag" id="bot-username">New Day Bot</span>
+            </div>
+        </div>
+    </header>
+
+    <!-- Main Content Grid -->
+    <div class="dashboard-wrapper">
+        <!-- Navigation Sidebar -->
+        <aside class="dashboard-nav">
+            <button class="nav-btn active" data-tab="ticket-tab">
+                <span class="nav-icon">🎟️</span>
+                <span class="nav-title">لوحة التذاكر (Tickets)</span>
+            </button>
+            <button class="nav-btn" data-tab="updates-tab">
+                <span class="nav-icon">📢</span>
+                <span class="nav-title">نشر التحديثات (Updates)</span>
+            </button>
+            <button class="nav-btn" data-tab="settings-tab">
+                <span class="nav-icon">⚙️</span>
+                <span class="nav-title">إعدادات البوت والربط</span>
+            </button>
+        </aside>
+
+        <!-- Main Workspace -->
+        <main class="dashboard-content">
+            
+            <!-- Tab 1: Ticket Panel Manager -->
+            <section class="tab-pane active" id="ticket-tab">
+                <div class="pane-grid">
+                    <!-- Form Controls -->
+                    <div class="panel-card form-card">
+                        <h2 class="card-title">⚙️ تخصيص رسالة التكت</h2>
+                        
+                        <div class="form-group">
+                            <label>📍 الروم المراد إرسال التكت فيها:</label>
+                            <select id="ticket-channel-select" class="form-input">
+                                <option value="">-- اختر الروم من سيرفرك --</option>
+                            </select>
+                        </div>
+
+                        <div class="form-group">
+                            <label>📝 عنوان الرسالة (Embed Title):</label>
+                            <input type="text" id="ticket-title-input" class="form-input" value="FET STORE - Support & Ticket System">
+                        </div>
+
+                        <div class="form-group">
+                            <label>📄 وصف التكت (Description):</label>
+                            <textarea id="ticket-desc-input" class="form-input" rows="6">عزيزي العضو / Dear Member
+
+من خلال هذه القائمة يمكنك:
+• اختيار القسم المناسب لفتح تذكرة دعم فني
+• سيتم إنشاء روم خاصة بك مع طاقم الدعم
+• سيقوم فريقنا بالرد عليك في أسرع وقت ممكن</textarea>
+                        </div>
+
+                        <div class="form-group">
+                            <label>📂 النص الظاهر بقائمة الاختيار (Dropdown Placeholder):</label>
+                            <input type="text" id="ticket-placeholder-input" class="form-input" value="📂 - اختر نوع الخدمة المطلوبة">
+                        </div>
+
+                        <div class="form-group">
+                            <label>🎨 لون الإطار (Hex Color):</label>
+                            <input type="color" id="ticket-color-input" class="color-picker" value="#00ff41">
+                        </div>
+
+                        <button id="btn-send-ticket" class="btn-primary">
+                            <span>🚀 إرسال / تحديث التكت في الديسكورد</span>
+                        </button>
+                    </div>
+
+                    <!-- Live Discord Preview (مطابقة الديسكورد 100%) -->
+                    <div class="panel-card preview-card">
+                        <h2 class="card-title">👁️ معاينة حية في الديسكورد</h2>
+                        <div class="discord-preview-box">
+                            <div class="discord-message">
+                                <img src="/static/img/logo.png" class="discord-avatar">
+                                <div class="discord-content">
+                                    <div class="discord-header">
+                                        <span class="bot-name">FET STORE BOT</span>
+                                        <span class="bot-badge">APP</span>
+                                        <span class="timestamp">Today at 11:45 PM</span>
+                                    </div>
+                                    
+                                    <!-- Discord Embed matching user's image -->
+                                    <div class="discord-embed" id="preview-embed" style="border-right-color: #00ff41;">
+                                        <div class="embed-author">
+                                            <img src="/static/img/logo.png" class="author-icon">
+                                            <span id="preview-author-text">FET STORE - Official Ticket System</span>
+                                        </div>
+
+                                        <div class="embed-body-flex">
+                                            <div class="embed-text-col">
+                                                <h3 class="embed-title" id="preview-title">FET STORE - Support & Ticket System</h3>
+                                                <div class="embed-desc" id="preview-desc">
+                                                    عزيزي العضو / Dear Member<br><br>
+                                                    من خلال هذه القائمة يمكنك:<br>
+                                                    • اختيار القسم المناسب لفتح تذكرة دعم فني<br>
+                                                    • سيتم إنشاء روم خاصة بك مع طاقم الدعم<br>
+                                                    • سيقوم فريقنا بالرد عليك في أسرع وقت ممكن
+                                                </div>
+                                            </div>
+                                            <!-- Top Right Thumbnail matching Image 4 -->
+                                            <img src="/static/img/logo.png" class="embed-thumbnail">
+                                        </div>
+
+                                        <!-- Bottom Banner matching Image 4 -->
+                                        <div class="embed-banner-container">
+                                            <img src="/static/img/ticket_banner.png" class="embed-banner">
+                                        </div>
+
+                                        <div class="embed-footer">
+                                            <img src="/static/img/logo.png" class="footer-icon">
+                                            <span>FET STORE | Best Quality Products</span>
+                                        </div>
+                                    </div>
+
+                                    <!-- Dropdown Select Menu matching user's image -->
+                                    <div class="discord-select-menu">
+                                        <span class="select-text" id="preview-select-placeholder">📂 - اختر نوع الخدمة المطلوبة</span>
+                                        <span class="select-arrow">▼</span>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Tab 2: Product Updates Broadcaster -->
+            <section class="tab-pane" id="updates-tab">
+                <div class="pane-grid">
+                    <div class="panel-card form-card">
+                        <h2 class="card-title">📢 نشر تحديث منتج جديد</h2>
+                        
+                        <div class="form-group">
+                            <label>📍 الروم المراد نشر التحديث فيها (روم التحديثات):</label>
+                            <select id="update-channel-select" class="form-input">
+                                <option value="">-- اختر الروم --</option>
+                            </select>
+                        </div>
+
+                        <div class="form-group">
+                            <label>🏷️ اسم المنتج أو السكربت المحدث:</label>
+                            <input type="text" id="update-product-input" class="form-input" placeholder="مثال: CAMRY 2024 V2 أو FET INVENTORY V1.0">
+                        </div>
+
+                        <div class="form-group">
+                            <label>📋 تفاصيل ومميزات التحديث (Changelog):</label>
+                            <textarea id="update-desc-input" class="form-input" rows="6" placeholder="• تم إصلاح مشكلة الأسلحة
+• تم إضافة وزنيات جديدة وسريعة
+• تحسين الأداء بنسبة 50%..."></textarea>
+                        </div>
+
+                        <div class="form-group">
+                            <label>🖼️ رابط صورة المنتج (اختياري):</label>
+                            <input type="text" id="update-image-input" class="form-input" placeholder="https://example.com/product.png">
+                        </div>
+
+                        <button id="btn-send-update" class="btn-primary">
+                            <span>📢 نشر التحديث إلى الديسكورد فوراً</span>
+                        </button>
+                    </div>
+
+                    <!-- Updates Live Preview -->
+                    <div class="panel-card preview-card">
+                        <h2 class="card-title">👁️ معاينة رسالة التحديث في الديسكورد</h2>
+                        <div class="discord-preview-box">
+                            <div class="discord-message">
+                                <img src="/static/img/logo.png" class="discord-avatar">
+                                <div class="discord-content">
+                                    <div class="discord-header">
+                                        <span class="bot-name">FET STORE BOT</span>
+                                        <span class="bot-badge">APP</span>
+                                        <span class="timestamp">Today at 11:50 PM</span>
+                                    </div>
+                                    <div class="discord-mention-tag">@everyone 📢 تحديث جديد في متجر <strong>FET STORE</strong></div>
+                                    
+                                    <div class="discord-embed" style="border-right-color: #00ff41;">
+                                        <div class="embed-body-flex">
+                                            <div class="embed-text-col">
+                                                <h3 class="embed-title" id="preview-update-title">🚀 تم تحديث المنتج: FET INVENTORY V1.0</h3>
+                                                <div class="embed-desc" id="preview-update-desc">
+                                                    • تم إضافة نظام الأسلحة التلقائي<br>
+                                                    • تحسين واجهة المستخدم باللون الأخضر النيون<br>
+                                                    • دعم كامل للسحب والإفلات
+                                                </div>
+                                            </div>
+                                            <!-- Top Right Logo Thumbnail -->
+                                            <img src="/static/img/logo.png" class="embed-thumbnail">
+                                        </div>
+
+                                        <div class="embed-footer">
+                                            <img src="/static/img/logo.png" class="footer-icon">
+                                            <span>FET STORE | New Update Released</span>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Tab 3: Settings -->
+            <section class="tab-pane" id="settings-tab">
+                <div class="panel-card" style="max-width: 650px; margin: 0 auto;">
+                    <h2 class="card-title">⚙️ إعدادات ربط البوت</h2>
+                    
+                    <div class="form-group">
+                        <label>🔑 توكن البوت (Bot Token):</label>
+                        <div class="token-wrapper">
+                            <input type="password" id="token-input" class="form-input" placeholder="الصق توكن البوت هنا...">
+                            <button type="button" id="toggle-token-btn" class="btn-secondary">إظهار</button>
+                        </div>
+                        <small class="form-hint">تحصل على التوكن من: Discord Developer Portal > Bot > Reset Token</small>
+                    </div>
+
+                    <div class="form-group">
+                        <label>🛡️ رتبة الإدارة والدعم الفني (Staff Role ID):</label>
+                        <select id="staff-role-select" class="form-input">
+                            <option value="">-- اختر الرتبة التي تستقبل التكتات --</option>
+                        </select>
+                        <input type="text" id="staff-role-id-manual" class="form-input mt-2" placeholder="أو اكتب Role ID يدوياً">
+                    </div>
+
+                    <div class="form-group">
+                        <label>📁 كاتجوري التكتات الفعالة (Active Category):</label>
+                        <select id="ticket-category-select" class="form-input">
+                            <option value="">-- اختر قسم التكتات الفعالة (تكتات فعالة) --</option>
+                        </select>
+                        <input type="text" id="category-id-manual" class="form-input mt-2" placeholder="أو اكتب Active Category ID يدوياً">
+                    </div>
+
+                    <div class="form-group">
+                        <label>📁 كاتجوري التكتات المغلقة (Closed Category):</label>
+                        <select id="closed-category-select" class="form-input">
+                            <option value="">-- اختر قسم التكتات المغلقة (تكتات مغلقة) --</option>
+                        </select>
+                        <input type="text" id="closed-category-id-manual" class="form-input mt-2" placeholder="أو اكتب Closed Category ID يدوياً">
+                    </div>
+
+                    <button id="btn-save-settings" class="btn-primary">
+                        <span>💾 حفظ الإعدادات وإعادة تشغيل البوت</span>
+                    </button>
+                </div>
+            </section>
+
+        </main>
+    </div>
+
+    <!-- Notification Toast -->
+    <div id="toast" class="toast hidden">
+        <span id="toast-msg">تمت العملية بنجاح!</span>
+    </div>
+
+    <script src="/static/js/app.js"></script>
+</body>
+</html>

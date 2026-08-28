@@ -1,0 +1,16 @@
+{
+    "token": "MTUzODA5MzAxODI5OTYzMzcyNA.G6Pk7P.E5DPUXjtaa8REr_inPG_8krdX3TpjnfFVy4bGs",
+    "client_id": "1538093018299633724",
+    "guild_id": "",
+    "staff_role_id": "1541905477510635551",
+    "ticket_category_id": "1541905522931011715",
+    "ticket_channel_id": "",
+    "updates_channel_id": "",
+    "ticket_title": "FET STORE - Support & Ticket System",
+    "ticket_description": "عزيزي العضو / Dear Member\n\nمن خلال هذه القائمة يمكنك:\n• اختيار القسم المناسب لفتح تذكرة دعم فني\n• سيتم إنشاء روم خاصة بك مع طاقم الإدارة\n• سيقوم فريقنا بالرد عليك في أسرع وقت ممكن",
+    "ticket_placeholder": "📂 - اختر نوع الخدمة المطلوبة",
+    "ticket_color": "#00ff41",
+    "ticket_banner_url": "/static/img/ticket_banner.png",
+    "ticket_thumbnail_url": "/static/img/logo.png",
+    "closed_category_id": ""
+}
