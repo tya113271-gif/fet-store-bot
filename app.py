@@ -21,12 +21,22 @@ CONFIG_PATH = os.path.join(BASE_DIR, "data", "config.json")
 ASSETS_DIR = os.path.join(BASE_DIR, "static", "img")
 
 def load_config():
+    cfg = {}
     if os.path.exists(CONFIG_PATH):
-        with open(CONFIG_PATH, "r", encoding="utf-8") as f:
-            return json.load(f)
-    return {}
+        try:
+            with open(CONFIG_PATH, "r", encoding="utf-8") as f:
+                cfg = json.load(f)
+        except:
+            cfg = {}
+            
+    env_token = os.environ.get("DISCORD_TOKEN") or os.environ.get("BOT_TOKEN")
+    if env_token:
+        cfg["token"] = env_token.strip()
+        
+    return cfg
 
 def save_config(cfg):
+    os.makedirs(os.path.dirname(CONFIG_PATH), exist_ok=True)
     with open(CONFIG_PATH, "w", encoding="utf-8") as f:
         json.dump(cfg, f, indent=4, ensure_ascii=False)
 
@@ -39,8 +49,8 @@ intents = discord.Intents.default()
 intents.guilds = True
 
 bot = commands.Bot(command_prefix="!", intents=intents)
-bot_loop = None
 bot_error_msg = None
+bot_thread_active = False
 
 def is_user_staff(member: discord.Member, guild: discord.Guild, staff_role_id):
     if member.guild_permissions.administrator or member.guild_permissions.manage_channels:
@@ -52,7 +62,6 @@ def is_user_staff(member: discord.Member, guild: discord.Guild, staff_role_id):
                 return True
         except:
             pass
-    # Check if user has any role containing staff/admin/owner/support
     for r in member.roles:
         r_name = r.name.lower()
         if any(kw in r_name for kw in ["admin", "staff", "owner", "support", "إدارة", "مسؤول", "دعم", "صاحب"]):
@@ -70,7 +79,6 @@ def get_target_category(guild, cat_id_key, search_keywords):
         except:
             pass
             
-    # Auto-detection by keyword
     for cat in guild.categories:
         for kw in search_keywords:
             if kw.lower() in cat.name.lower():
@@ -106,7 +114,6 @@ class ClosedTicketActionView(discord.ui.View):
         guild = interaction.guild
         channel = interaction.channel
         
-        # Find Ticket Owner from topic ID: (\d+)
         owner_id = None
         if channel.topic:
             match = re.search(r"ID:\s*(\d+)", channel.topic)
@@ -125,7 +132,6 @@ class ClosedTicketActionView(discord.ui.View):
                     embed_links=True
                 ))
         else:
-            # Fallback
             for target in list(channel.overwrites.keys()):
                 if isinstance(target, discord.Member) and not target.bot:
                     await channel.set_permissions(target, overwrite=discord.PermissionOverwrite(
@@ -162,7 +168,6 @@ class CloseTicketView(discord.ui.View):
         cfg = load_config()
         staff_role_id = cfg.get("staff_role_id")
 
-        # 1. Check if user is Staff/Admin - ONLY Staff can close tickets!
         if not is_user_staff(user, guild, staff_role_id):
             await interaction.response.send_message("❌ عذراً، إغلاق التذكرة متاح فقط لطاقم الإدارة والدعم الفني.", ephemeral=True)
             return
@@ -171,7 +176,7 @@ class CloseTicketView(discord.ui.View):
         
         staff_role = guild.get_role(int(staff_role_id)) if staff_role_id else None
 
-        # 2. Move to Closed Category
+        # Move to Closed Category
         closed_cat = get_target_category(guild, "closed_category_id", ["مغلق", "closed", "تكتات مغلقة", "archive"])
         new_name = channel.name.replace("ticket-", "closed-")
         if not new_name.startswith("closed-"):
@@ -185,7 +190,7 @@ class CloseTicketView(discord.ui.View):
         except Exception as e:
             logger.error(f"Error moving ticket channel: {e}")
 
-        # 3. Lock @everyone on this channel
+        # Lock @everyone on this channel
         try:
             await channel.set_permissions(guild.default_role, overwrite=discord.PermissionOverwrite(
                 view_channel=False,
@@ -196,7 +201,7 @@ class CloseTicketView(discord.ui.View):
         except Exception as e:
             logger.error(f"Error locking default role: {e}")
 
-        # 4. Explicitly deny all non-staff members in overwrites
+        # Explicitly deny all non-staff members in overwrites
         for target in list(channel.overwrites.keys()):
             if isinstance(target, discord.Member) and not target.bot:
                 if not is_user_staff(target, guild, staff_role_id):
@@ -210,7 +215,7 @@ class CloseTicketView(discord.ui.View):
                     except Exception as e:
                         logger.error(f"Error locking member overwrite: {e}")
 
-        # 5. Explicitly deny all non-staff members currently in channel.members
+        # Explicitly deny all non-staff members currently in channel.members
         for m in list(channel.members):
             if not m.bot and not is_user_staff(m, guild, staff_role_id):
                 try:
@@ -223,7 +228,7 @@ class CloseTicketView(discord.ui.View):
                 except Exception as e:
                     logger.error(f"Error locking member: {e}")
 
-        # 6. Extract ticket owner by ID from topic and deny
+        # Extract ticket owner by ID from topic and deny
         if channel.topic:
             match = re.search(r"ID:\s*(\d+)", channel.topic)
             if match:
@@ -240,7 +245,7 @@ class CloseTicketView(discord.ui.View):
                     except Exception as e:
                         logger.error(f"Error locking owner: {e}")
 
-        # 7. Ensure Staff Role retains full view permissions
+        # Ensure Staff Role retains full view permissions
         if staff_role:
             try:
                 await channel.set_permissions(staff_role, overwrite=discord.PermissionOverwrite(
@@ -253,7 +258,7 @@ class CloseTicketView(discord.ui.View):
             except Exception as e:
                 logger.error(f"Error setting staff role permissions: {e}")
 
-        # 8. Send closed action panel
+        # Send closed action panel
         embed = discord.Embed(
             title="🔒 تم إغلاق التذكرة | FET STORE",
             description=f"تم إغلاق التذكرة بنجاح وسحب صلاحية المشاهدة من العميل.\n\n"
@@ -289,10 +294,8 @@ class TicketDropdown(discord.ui.Select):
         staff_role_id = int(cfg.get("staff_role_id")) if cfg.get("staff_role_id") else None
         staff_role = guild.get_role(staff_role_id) if staff_role_id else None
         
-        # Find Active Category (تكتات فعالة)
         active_cat = get_target_category(guild, "ticket_category_id", ["فعال", "active", "تكتات فعالة", "open"])
         
-        # Overwrites
         overwrites = {
             guild.default_role: discord.PermissionOverwrite(view_channel=False, read_messages=False, send_messages=False),
             user: discord.PermissionOverwrite(view_channel=True, read_messages=True, send_messages=True, read_message_history=True, attach_files=True, embed_links=True),
@@ -387,7 +390,7 @@ def api_config_save():
     cfg.update(data)
     save_config(cfg)
     
-    if new_token and new_token != old_token:
+    if new_token and (new_token != old_token or not bot.is_ready()):
         start_bot_in_background(new_token)
         
     return jsonify({"status": "ok", "message": "Settings saved successfully!"})
@@ -495,26 +498,29 @@ def api_update_send():
         return jsonify({"status": "error", "message": str(e)}), 500
 
 def bot_worker(token):
-    global bot_loop, bot_error_msg
-    loop = asyncio.new_event_loop()
-    asyncio.set_event_loop(loop)
-    bot_loop = loop
+    global bot_error_msg, bot_thread_active
+    bot_thread_active = True
     try:
-        loop.run_until_complete(bot.start(token))
+        asyncio.run(bot.start(token))
     except Exception as e:
         bot_error_msg = str(e)
         logger.error(f"[BOT LOGIN ERROR] {e}")
+    finally:
+        bot_thread_active = False
 
 def start_bot_in_background(token):
-    if token:
-        threading.Thread(target=bot_worker, args=(token,), daemon=True).start()
+    global bot_thread_active
+    if token and not bot_thread_active and not bot.is_ready():
+        t = threading.Thread(target=bot_worker, args=(token,), daemon=True)
+        t.start()
+
+# Auto-start bot on module load
+_init_cfg = load_config()
+_init_token = _init_cfg.get("token", "").strip()
+if _init_token:
+    start_bot_in_background(_init_token)
 
 if __name__ == "__main__":
-    cfg = load_config()
-    token = cfg.get("token", "").strip()
-    if token:
-        start_bot_in_background(token)
-        
     port = int(os.environ.get("PORT", 5000))
     print(f"[FET DASHBOARD] Server running on port {port}")
     app.run(host="0.0.0.0", port=port, debug=False)
