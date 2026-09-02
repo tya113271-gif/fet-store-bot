@@ -96,256 +96,209 @@ def get_target_category(guild, cat_id_key, search_keywords):
                 return cat
         except:
             pass
-            
     for cat in guild.categories:
-        for kw in search_keywords:
-            if kw.lower() in cat.name.lower():
-                return cat
+        cat_lower = cat.name.lower()
+        if any(kw.lower() in cat_lower for kw in search_keywords):
+            return cat
     return None
 
-# [[ UI Views for Closed Tickets ]] #
+class CloseTicketView(discord.ui.View):
+    def __init__(self):
+        super().__init__(timeout=None)
+
+    @discord.ui.button(label="إغلاق التذكرة", style=discord.ButtonStyle.danger, emoji="🔒", custom_id="fet_btn_close_ticket")
+    async def close_ticket_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
+        channel = interaction.channel
+        guild = interaction.guild
+        cfg = load_config()
+        staff_role_id = cfg.get("staff_role_id", "")
+        
+        is_owner = False
+        if channel.topic and "FET_TICKET_OWNER:" in channel.topic:
+            try:
+                owner_id_str = channel.topic.split("FET_TICKET_OWNER:")[1].split()[0]
+                is_owner = (interaction.user.id == int(owner_id_str))
+            except:
+                pass
+                
+        is_staff = is_user_staff(interaction.user, guild, staff_role_id)
+        if not (is_owner or is_staff):
+            await interaction.response.send_message("❌ عذراً، فقط صاحب التذكرة أو طاقم الإدارة يمكنهم إغلاق التذكرة.", ephemeral=True)
+            return
+
+        await interaction.response.defer()
+        
+        target_closed_category = get_target_category(guild, "closed_category_id", ["تكتات مغلقة", "تذاكر مغلقة", "closed tickets", "closed", "مغلق"])
+        
+        new_name = f"closed-{channel.name.split('-')[-1]}"
+        try:
+            if target_closed_category:
+                await channel.edit(category=target_closed_category, name=new_name)
+            else:
+                await channel.edit(name=new_name)
+        except Exception as e:
+            logger.warning(f"Could not rename/move channel: {e}")
+
+        close_embed = discord.Embed(
+            title="🔒 تم إغلاق التذكرة",
+            description=f"تم إغلاق التذكرة بواسطة: {interaction.user.mention}\nيمكنك إعادة فتح التذكرة أو حذفها نهائياً عبر الأزرار أدناه.",
+            color=discord.Color.from_str("#ff4757")
+        )
+        if os.path.exists(os.path.join(ASSETS_DIR, "logo_circle.png")):
+            close_embed.set_footer(text="FET STORE | Ticket Closed", icon_url="attachment://logo_circle.png")
+            file = discord.File(os.path.join(ASSETS_DIR, "logo_circle.png"), filename="logo_circle.png")
+            await channel.send(embed=close_embed, file=file, view=ClosedTicketActionView())
+        else:
+            close_embed.set_footer(text="FET STORE | Ticket Closed")
+            await channel.send(embed=close_embed, view=ClosedTicketActionView())
+
 class ClosedTicketActionView(discord.ui.View):
     def __init__(self):
         super().__init__(timeout=None)
 
-    @discord.ui.button(label="حذف نهائي (Delete Ticket)", style=discord.ButtonStyle.danger, custom_id="fet_delete_ticket_btn", emoji="🗑️")
-    async def delete_ticket(self, interaction: discord.Interaction, button: discord.ui.Button):
-        cfg = load_config()
-        if not is_user_staff(interaction.user, interaction.guild, cfg.get("staff_role_id")):
-            await interaction.response.send_message("❌ عذراً، حذف التذكرة متاح فقط لطاقم الإدارة والدعم الفني.", ephemeral=True)
-            return
-
-        await interaction.response.send_message("⚠️ جاري حذف التذكرة نهائياً خلال 3 ثوانٍ...", ephemeral=False)
-        await asyncio.sleep(3)
-        try:
-            await interaction.channel.delete(reason=f"Permanently deleted by {interaction.user}")
-        except Exception as e:
-            logger.error(f"Error deleting channel: {e}")
-
-    @discord.ui.button(label="إعادة فتح (Re-open Ticket)", style=discord.ButtonStyle.success, custom_id="fet_reopen_ticket_btn", emoji="🔓")
-    async def reopen_ticket(self, interaction: discord.Interaction, button: discord.ui.Button):
-        cfg = load_config()
-        if not is_user_staff(interaction.user, interaction.guild, cfg.get("staff_role_id")):
-            await interaction.response.send_message("❌ عذراً، إعادة فتح التذكرة متاح فقط لطاقم الإدارة.", ephemeral=True)
-            return
-
-        guild = interaction.guild
+    @discord.ui.button(label="إعادة فتح التذكرة", style=discord.ButtonStyle.success, emoji="🔓", custom_id="fet_btn_reopen_ticket")
+    async def reopen_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
         channel = interaction.channel
+        guild = interaction.guild
+        cfg = load_config()
+        staff_role_id = cfg.get("staff_role_id", "")
         
-        owner_id = None
-        if channel.topic:
-            match = re.search(r"ID:\s*(\d+)", channel.topic)
-            if match:
-                owner_id = int(match.group(1))
+        if not is_user_staff(interaction.user, guild, staff_role_id):
+            await interaction.response.send_message("❌ عذراً، فقط طاقم الإدارة يمكنهم إعادة فتح التذكرة.", ephemeral=True)
+            return
 
-        if owner_id:
-            owner_member = guild.get_member(owner_id)
-            if owner_member:
-                await channel.set_permissions(owner_member, overwrite=discord.PermissionOverwrite(
-                    view_channel=True,
-                    read_messages=True,
-                    send_messages=True,
-                    read_message_history=True,
-                    attach_files=True,
-                    embed_links=True
-                ))
-        else:
-            for target in list(channel.overwrites.keys()):
-                if isinstance(target, discord.Member) and not target.bot:
-                    await channel.set_permissions(target, overwrite=discord.PermissionOverwrite(
-                        view_channel=True,
-                        read_messages=True,
-                        send_messages=True,
-                        read_message_history=True,
-                        attach_files=True,
-                        embed_links=True
-                    ))
-        
-        active_cat = get_target_category(guild, "ticket_category_id", ["فعال", "active", "تكتات فعالة", "open"])
-        new_name = channel.name.replace("closed-", "ticket-").replace("مغلق-", "ticket-")
+        await interaction.response.defer()
+        active_cat = get_target_category(guild, "ticket_category_id", ["تكتات فعالة", "تذاكر فعالة", "active tickets", "tickets", "تذاكر"])
+        new_name = f"ticket-{channel.name.split('-')[-1]}"
         try:
             if active_cat:
                 await channel.edit(category=active_cat, name=new_name)
             else:
                 await channel.edit(name=new_name)
         except Exception as e:
-            logger.error(f"Error reopening channel: {e}")
-            
-        await interaction.response.send_message(f"🔓 تم إعادة فتح التذكرة بنجاح بواسطة {interaction.user.mention} وإعادة صلاحيات المشاهدة للعميل!", view=CloseTicketView())
+            logger.warning(f"Could not rename/move channel on reopen: {e}")
 
-# [[ UI View for Active Tickets ]] #
-class CloseTicketView(discord.ui.View):
-    def __init__(self):
-        super().__init__(timeout=None)
+        reopen_embed = discord.Embed(
+            title="🔓 تمت إعادة فتح التذكرة",
+            description=f"قام {interaction.user.mention} بإعادة فتح التذكرة.",
+            color=discord.Color.from_str("#00ff41")
+        )
+        await channel.send(embed=reopen_embed, view=CloseTicketView())
 
-    @discord.ui.button(label="إغلاق التذكرة (Close Ticket)", style=discord.ButtonStyle.danger, custom_id="fet_close_ticket_btn", emoji="🔒")
-    async def close_ticket(self, interaction: discord.Interaction, button: discord.ui.Button):
-        guild = interaction.guild
+    @discord.ui.button(label="حذف التذكرة نهائياً", style=discord.ButtonStyle.danger, emoji="🗑️", custom_id="fet_btn_delete_ticket")
+    async def delete_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
         channel = interaction.channel
-        user = interaction.user
+        guild = interaction.guild
         cfg = load_config()
-        staff_role_id = cfg.get("staff_role_id")
-
-        if not is_user_staff(user, guild, staff_role_id):
-            await interaction.response.send_message("❌ عذراً، إغلاق التذكرة متاح فقط لطاقم الإدارة والدعم الفني.", ephemeral=True)
+        staff_role_id = cfg.get("staff_role_id", "")
+        
+        if not is_user_staff(interaction.user, guild, staff_role_id):
+            await interaction.response.send_message("❌ عذراً، فقط طاقم الإدارة يمكنهم حذف التذكرة.", ephemeral=True)
             return
 
-        await interaction.response.send_message(f"🔒 تم إغلاق التذكرة بواسطة {user.mention}. تم سحب صلاحية المشاهدة من العميل ونقل التذكرة إلى قسم التكتات المغلقة (للإدارة فقط).", ephemeral=False)
-        
-        staff_role = guild.get_role(int(staff_role_id)) if staff_role_id else None
-
-        # Move to Closed Category
-        closed_cat = get_target_category(guild, "closed_category_id", ["مغلق", "closed", "تكتات مغلقة", "archive"])
-        new_name = channel.name.replace("ticket-", "closed-")
-        if not new_name.startswith("closed-"):
-            new_name = f"closed-{new_name[:20]}"
-            
+        await interaction.response.send_message("⏳ سيتم حذف التذكرة نهائياً خلال 3 ثوانٍ...")
+        await asyncio.sleep(3)
         try:
-            if closed_cat:
-                await channel.edit(category=closed_cat, name=new_name, sync_permissions=False)
-            else:
-                await channel.edit(name=new_name)
+            await channel.delete(reason=f"Ticket deleted by {interaction.user}")
         except Exception as e:
-            logger.error(f"Error moving ticket channel: {e}")
-
-        # Lock @everyone on this channel
-        try:
-            await channel.set_permissions(guild.default_role, overwrite=discord.PermissionOverwrite(
-                view_channel=False,
-                read_messages=False,
-                send_messages=False,
-                read_message_history=False
-            ))
-        except Exception as e:
-            logger.error(f"Error locking default role: {e}")
-
-        for target in list(channel.overwrites.keys()):
-            if isinstance(target, discord.Member) and not target.bot:
-                if not is_user_staff(target, guild, staff_role_id):
-                    try:
-                        await channel.set_permissions(target, overwrite=discord.PermissionOverwrite(
-                            view_channel=False,
-                            read_messages=False,
-                            send_messages=False,
-                            read_message_history=False
-                        ))
-                    except Exception as e:
-                        logger.error(f"Error locking member overwrite: {e}")
-
-        for m in list(channel.members):
-            if not m.bot and not is_user_staff(m, guild, staff_role_id):
-                try:
-                    await channel.set_permissions(m, overwrite=discord.PermissionOverwrite(
-                        view_channel=False,
-                        read_messages=False,
-                        send_messages=False,
-                        read_message_history=False
-                    ))
-                except Exception as e:
-                    logger.error(f"Error locking member: {e}")
-
-        if channel.topic:
-            match = re.search(r"ID:\s*(\d+)", channel.topic)
-            if match:
-                owner_id = int(match.group(1))
-                owner_member = guild.get_member(owner_id)
-                if owner_member and not is_user_staff(owner_member, guild, staff_role_id):
-                    try:
-                        await channel.set_permissions(owner_member, overwrite=discord.PermissionOverwrite(
-                            view_channel=False,
-                            read_messages=False,
-                            send_messages=False,
-                            read_message_history=False
-                        ))
-                    except Exception as e:
-                        logger.error(f"Error locking owner: {e}")
-
-        if staff_role:
-            try:
-                await channel.set_permissions(staff_role, overwrite=discord.PermissionOverwrite(
-                    view_channel=True,
-                    read_messages=True,
-                    send_messages=True,
-                    attach_files=True,
-                    read_message_history=True
-                ))
-            except Exception as e:
-                logger.error(f"Error setting staff role permissions: {e}")
-
-        embed = discord.Embed(
-            title="🔒 تم إغلاق التذكرة | FET STORE",
-            description=f"تم إغلاق التذكرة بنجاح وسحب صلاحية المشاهدة من العميل.\n\n"
-                        f"• **الروم أصبحت مخفية تماماً عن العميل ومرئية للإدارة فقط**.\n"
-                        f"• تم الإغلاق بواسطة: {user.mention}\n"
-                        f"• يمكنك إعادة فتح التذكرة للعميل أو حذفها نهائياً عبر الأزرار أدناه.",
-            color=discord.Color.from_str("#ff4757")
-        )
-        await channel.send(embed=embed, view=ClosedTicketActionView())
+            logger.error(f"Error deleting channel: {e}")
 
 class TicketDropdown(discord.ui.Select):
     def __init__(self, placeholder="📂 - اختر نوع الخدمة المطلوبة"):
         options = [
-            discord.SelectOption(label="شراء منتج", emoji="🛒", value="buy"),
-            discord.SelectOption(label="استفسار", emoji="❓", value="inquiry"),
-            discord.SelectOption(label="طلب سكربت خاص", emoji="💎", value="custom_script"),
+            discord.SelectOption(label="قسم شراء ملفات ومودات", description="شراء سكربتات ومودات حصرية", emoji="🛒", value="buy_scripts"),
+            discord.SelectOption(label="قسم الدعم الفني والمساعدة", description="استفسارات ومساعدة تقنية وتثبيت", emoji="🛠️", value="support_tech"),
+            discord.SelectOption(label="قسم الشكاوى والاقتراحات", description="تقديم شكوى أو اقتراح لإدارة المتجر", emoji="📩", value="complaints"),
+            discord.SelectOption(label="قسم استلام وتفعيل المنتجات", description="استلام كود التفعيل أو المفتاح", emoji="🔑", value="claim_product"),
+            discord.SelectOption(label="قسم الاستفسارات العامة", description="أي استفسار أو طلب خاص", emoji="💬", value="general_inquiry"),
         ]
-        super().__init__(placeholder=placeholder, min_values=1, max_values=1, options=options, custom_id="fet_ticket_dropdown")
+        super().__init__(
+            placeholder=placeholder,
+            min_values=1,
+            max_values=1,
+            options=options,
+            custom_id="fet_store_ticket_select"
+        )
 
     async def callback(self, interaction: discord.Interaction):
         guild = interaction.guild
         user = interaction.user
-        selected_value = self.values[0]
-        
-        service_titles = {
-            "buy": "شراء منتج",
-            "inquiry": "استفسار",
-            "custom_script": "طلب سكربت خاص"
-        }
-        service_name = service_titles.get(selected_value, selected_value)
-        
-        cfg = load_config()
-        staff_role_id = int(cfg.get("staff_role_id")) if cfg.get("staff_role_id") else None
-        staff_role = guild.get_role(staff_role_id) if staff_role_id else None
-        
-        active_cat = get_target_category(guild, "ticket_category_id", ["فعال", "active", "تكتات فعالة", "open"])
-        
-        overwrites = {
-            guild.default_role: discord.PermissionOverwrite(view_channel=False, read_messages=False, send_messages=False),
-            user: discord.PermissionOverwrite(view_channel=True, read_messages=True, send_messages=True, read_message_history=True, attach_files=True, embed_links=True),
-            guild.me: discord.PermissionOverwrite(view_channel=True, read_messages=True, send_messages=True, manage_channels=True)
-        }
-        if staff_role:
-            overwrites[staff_role] = discord.PermissionOverwrite(view_channel=True, read_messages=True, send_messages=True, attach_files=True, read_message_history=True)
+        selected_val = self.values[0]
+        selected_opt = next((opt for opt in self.options if opt.value == selected_val), None)
+        dept_name = selected_opt.label if selected_opt else selected_val
 
-        channel_name = f"ticket-{user.name.lower()[:15]}"
-        ticket_channel = await guild.create_text_channel(
-            name=channel_name,
-            category=active_cat,
-            overwrites=overwrites,
-            topic=f"Ticket for {user} (ID: {user.id}) | Reason: {service_name}"
-        )
+        active_cat = get_target_category(guild, "ticket_category_id", ["تكتات فعالة", "تذاكر فعالة", "active tickets", "tickets", "تذاكر"])
+        
+        # Check existing ticket
+        for ch in guild.text_channels:
+            if ch.topic and f"FET_TICKET_OWNER:{user.id}" in ch.topic and not ch.name.startswith("closed"):
+                await interaction.response.send_message(f"⚠️ لديك تذكرة مفتوحة بالفعل: {ch.mention}", ephemeral=True)
+                return
+
+        await interaction.response.defer(ephemeral=True)
+
+        overwrites = {
+            guild.default_role: discord.PermissionOverwrite(view_channel=False),
+            user: discord.PermissionOverwrite(view_channel=True, send_messages=True, attach_files=True, embed_links=True, read_message_history=True),
+            guild.me: discord.PermissionOverwrite(view_channel=True, send_messages=True, manage_channels=True, manage_permissions=True)
+        }
+
+        cfg = load_config()
+        staff_role_id = cfg.get("staff_role_id", "")
+        if staff_role_id:
+            try:
+                staff_role = guild.get_role(int(staff_role_id))
+                if staff_role:
+                    overwrites[staff_role] = discord.PermissionOverwrite(view_channel=True, send_messages=True, attach_files=True, embed_links=True, read_message_history=True)
+            except:
+                pass
+
+        ticket_code = f"{user.name[:4]}-{str(user.id)[-4:]}".lower()
+        channel_name = f"ticket-{ticket_code}"
+
+        try:
+            if active_cat:
+                ticket_chan = await guild.create_text_channel(
+                    name=channel_name,
+                    category=active_cat,
+                    overwrites=overwrites,
+                    topic=f"FET_TICKET_OWNER:{user.id} | القسم: {dept_name}"
+                )
+            else:
+                ticket_chan = await guild.create_text_channel(
+                    name=channel_name,
+                    overwrites=overwrites,
+                    topic=f"FET_TICKET_OWNER:{user.id} | القسم: {dept_name}"
+                )
+        except Exception as e:
+            await interaction.followup.send(f"❌ حدث خطأ أثناء إنشاء روم التذكرة: {e}", ephemeral=True)
+            return
 
         embed = discord.Embed(
-            title=f"🎫 تذكرة جديدة: {service_name} | FET STORE",
-            description=f"مرحباً بك {user.mention} في الدعم الفني لمتجر **FET STORE**!\n\n"
-                        f"• **نوع الخدمة:** `{service_name}`\n"
-                        f"• تفضل بكتابة طلبك أو استفسارك بالتفصيل وسيقوم فريقنا بالرد عليك بأسرع وقت.",
-            color=discord.Color.from_str(cfg.get("ticket_color", "#00ff41"))
+            title=f"🎟️ تذكرة جديدة | {dept_name}",
+            description=f"مرحباً بك يا {user.mention} في قسم **{dept_name}**!\n\n• يرجى كتابة طلبك أو استفسارك بالتفصيل مع توفير معلومات الدفع إن وجدت.\n• سيتواصل معك أحد مسؤولي المتجر في أقرب وقت.\n\nاضغط على الزر أدناه لإغلاق التذكرة عند الانتهاء.",
+            color=discord.Color.from_str("#00ff41")
         )
+        
+        files = []
         logo_path = os.path.join(ASSETS_DIR, "logo_circle.png")
         if not os.path.exists(logo_path):
             logo_path = os.path.join(ASSETS_DIR, "logo.png")
             
         if os.path.exists(logo_path):
-            file = discord.File(logo_path, filename="logo.png")
-            embed.set_thumbnail(url="attachment://logo.png")
-            embed.set_footer(text="FET STORE | Official Support System", icon_url="attachment://logo.png")
-            await ticket_channel.send(content=f"{user.mention} | طاقم الدعم جاهز لمساعدتك", embed=embed, file=file, view=CloseTicketView())
+            files.append(discord.File(logo_path, filename="logo_circle.png"))
+            embed.set_thumbnail(url="attachment://logo_circle.png")
+            embed.set_footer(text="FET STORE | نظام الدعم وخدمة العملاء", icon_url="attachment://logo_circle.png")
         else:
-            embed.set_footer(text="FET STORE | Official Support System")
-            await ticket_channel.send(content=f"{user.mention} | طاقم الدعم جاهز لمساعدتك", embed=embed, view=CloseTicketView())
+            embed.set_footer(text="FET STORE | نظام الدعم وخدمة العملاء")
 
-        await interaction.response.send_message(f"✅ تم فتح تذكرتك بنجاح في: {ticket_channel.mention}", ephemeral=True)
+        staff_mention = f"<@&{staff_role_id}>" if staff_role_id else "@here"
+        if files:
+            await ticket_chan.send(content=f"{user.mention} {staff_mention}", embed=embed, files=files, view=CloseTicketView())
+        else:
+            await ticket_chan.send(content=f"{user.mention} {staff_mention}", embed=embed, view=CloseTicketView())
+
+        await interaction.followup.send(f"✅ تم فتح تذكرتك بنجاح: {ticket_chan.mention}", ephemeral=True)
 
 class TicketPanelView(discord.ui.View):
     def __init__(self, placeholder="📂 - اختر نوع الخدمة المطلوبة"):
@@ -354,9 +307,7 @@ class TicketPanelView(discord.ui.View):
 
 @bot.event
 async def on_ready():
-    global bot_error_msg
-    bot_error_msg = None
-    logger.info(f"[BOT READY] Logged in as: {bot.user} (ID: {bot.user.id})")
+    logger.info(f"Bot connected as {bot.user} (ID: {bot.user.id})")
     bot.add_view(TicketPanelView())
     bot.add_view(CloseTicketView())
     bot.add_view(ClosedTicketActionView())
@@ -414,32 +365,32 @@ body { background-color:var(--bg-dark); color:var(--text-white); min-height:100v
 .tab-pane { display:none; }
 .tab-pane.active { display:block; }
 .pane-grid { display:grid; grid-template-columns:1fr 1.15fr; gap:24px; }
-.panel-card { background:var(--bg-card); border:1px solid var(--border-color); border-radius:12px; padding:24px; box-shadow:0 4px 25px rgba(0,0,0,0.4); }
-.card-title { font-size:18px; font-weight:800; margin-bottom:20px; color:var(--text-white); border-bottom:1px solid var(--border-color); padding-bottom:12px; }
-.form-group { margin-bottom:18px; }
-.form-group label { display:block; font-size:13px; font-weight:700; color:var(--neon-green); margin-bottom:8px; }
-.form-input { width:100%; background:var(--bg-input); border:1px solid var(--border-color); border-radius:8px; padding:10px 14px; color:var(--text-white); font-size:14px; outline:none; transition:all 0.2s ease; }
+.panel-card { background:var(--bg-card); border:1px solid var(--border-color); border-radius:12px; padding:24px; box-shadow:0 8px 30px rgba(0,0,0,0.3); }
+.card-title { font-size:16px; font-weight:800; margin-bottom:20px; color:var(--neon-green); border-bottom:1px solid var(--border-color); padding-bottom:10px; }
+.form-group { margin-bottom:16px; }
+.form-group label { display:block; font-size:13px; font-weight:700; margin-bottom:6px; color:#c0d0c0; }
+.form-input { width:100%; background:var(--bg-input); border:1px solid var(--border-color); border-radius:8px; padding:10px 14px; color:var(--text-white); font-size:13px; outline:none; transition:all 0.2s; }
 .form-input:focus { border-color:var(--neon-green); box-shadow:0 0 10px var(--neon-glow); }
-textarea.form-input { resize:vertical; line-height:1.6; }
-.color-picker { width:100%; height:40px; border:1px solid var(--border-color); border-radius:6px; background:transparent; cursor:pointer; }
-.btn-primary { width:100%; background:var(--neon-green); color:#040c04; border:none; border-radius:8px; padding:12px 0; font-size:15px; font-weight:800; cursor:pointer; box-shadow:0 0 20px var(--neon-glow); transition:all 0.2s ease; margin-top:10px; }
-.btn-primary:hover { background:#ffffff; box-shadow:0 0 25px #ffffff; transform:translateY(-2px); }
+.color-picker { width:100%; height:40px; background:var(--bg-input); border:1px solid var(--border-color); border-radius:8px; cursor:pointer; padding:4px; }
+.btn-primary { width:100%; background:var(--neon-green); color:#000; border:none; border-radius:8px; padding:12px; font-size:14px; font-weight:900; cursor:pointer; transition:all 0.2s ease; margin-top:8px; box-shadow:0 0 15px var(--neon-glow); }
+.btn-primary:hover { background:#10db44; box-shadow:0 0 25px var(--neon-green); transform:translateY(-1px); }
+.btn-secondary { background:transparent; border:1px solid var(--border-color); color:var(--text-white); padding:8px 14px; border-radius:6px; font-size:12px; font-weight:700; cursor:pointer; }
 .token-wrapper { display:flex; gap:8px; }
-.btn-secondary { background:rgba(0,255,65,0.1); color:var(--neon-green); border:1px solid var(--border-color); padding:0 16px; border-radius:6px; cursor:pointer; font-weight:700; }
-.form-hint { display:block; color:var(--text-muted); font-size:11px; margin-top:6px; }
 .mt-2 { margin-top:8px; }
-.discord-preview-box { background:var(--discord-bg); border-radius:8px; padding:20px; direction:ltr; text-align:left; }
-.discord-message { display:flex; gap:16px; }
-.discord-avatar { width:42px; height:42px; border-radius:50%; flex-shrink:0; }
-.discord-content { flex:1; display:flex; flex-direction:column; gap:8px; }
+.form-hint { display:block; font-size:11px; color:var(--text-muted); margin-top:4px; }
+.discord-preview-box { background:var(--discord-bg); border-radius:8px; padding:16px; }
+.discord-message { display:flex; gap:14px; }
+.discord-avatar { width:40px; height:40px; border-radius:50%; flex-shrink:0; }
+.discord-content { flex:1; display:flex; flex-direction:column; gap:6px; }
 .discord-header { display:flex; align-items:center; gap:8px; }
-.bot-name { font-weight:700; color:var(--discord-white); font-size:15px; }
-.bot-badge { background:#5865f2; color:#ffffff; font-size:10px; font-weight:700; padding:1px 5px; border-radius:3px; }
-.timestamp { font-size:12px; color:#949ba4; }
+.bot-name { font-weight:700; color:var(--discord-white); font-size:14px; }
+.bot-badge { background:#5865f2; color:#fff; font-size:10px; font-weight:800; padding:1px 4px; border-radius:3px; }
+.timestamp { font-size:11px; color:#949ba4; }
 .discord-embed { background:var(--discord-embed-bg); border-left:4px solid var(--neon-green); border-radius:4px; padding:12px 16px; display:flex; flex-direction:column; gap:10px; max-width:520px; }
 .embed-author { display:flex; align-items:center; gap:8px; font-size:13px; font-weight:700; color:var(--discord-white); }
 .author-icon { width:20px; height:20px; border-radius:50%; }
 .embed-body-flex { display:flex; justify-content:space-between; gap:12px; }
+.embed-text-col { flex:1; }
 .embed-title { font-size:16px; font-weight:700; color:var(--discord-white); margin-bottom:6px; }
 .embed-desc { font-size:13px; color:var(--discord-text); line-height:1.5; white-space:pre-line; }
 .embed-thumbnail { width:65px; height:65px; border-radius:50%; object-fit:cover; flex-shrink:0; }
@@ -757,14 +708,14 @@ textarea.form-input { resize:vertical; line-height:1.6; }
                     <div class="form-group">
                         <label>📁 كاتجوري التكتات الفعالة (Active Category):</label>
                         <select id="ticket-category-select" class="form-input">
-                            <option value="">-- اختر قسم التكتات الفعالة (تكتات فعالة) --</option>
+                            <option value="">-- اختر قسم التكتات الفعالة --</option>
                         </select>
                         <input type="text" id="category-id-manual" class="form-input mt-2" placeholder="أو اكتب Active Category ID يدوياً">
                     </div>
                     <div class="form-group">
                         <label>📁 كاتجوري التكتات المغلقة (Closed Category):</label>
                         <select id="closed-category-select" class="form-input">
-                            <option value="">-- اختر قسم التكتات المغلقة (تكتات مغلقة) --</option>
+                            <option value="">-- اختر قسم التكتات المغلقة --</option>
                         </select>
                         <input type="text" id="closed-category-id-manual" class="form-input mt-2" placeholder="أو اكتب Closed Category ID يدوياً">
                     </div>
@@ -784,11 +735,9 @@ textarea.form-input { resize:vertical; line-height:1.6; }
 let currentConfig = {};
 let botData = {};
 
-const botStatusDot = document.querySelector('.status-dot');
-const botStatusText = document.getElementById('bot-status-text');
-const botProfileCard = document.getElementById('bot-profile-card');
-const botUsername = document.getElementById('bot-username');
-const botAvatar = document.getElementById('bot-avatar');
+function safeElem(id) {
+    return document.getElementById(id);
+}
 
 document.querySelectorAll('.nav-btn').forEach(btn => {
     btn.addEventListener('click', () => {
@@ -796,44 +745,45 @@ document.querySelectorAll('.nav-btn').forEach(btn => {
         document.querySelectorAll('.tab-pane').forEach(p => p.classList.remove('active'));
         btn.classList.add('active');
         const tabId = btn.dataset.tab;
-        document.getElementById(tabId).classList.add('active');
+        const target = safeElem(tabId);
+        if (target) target.classList.add('active');
     });
 });
 
-const ticketTitleInput = document.getElementById('ticket-title-input');
-const ticketDescInput = document.getElementById('ticket-desc-input');
-const ticketPlaceholderInput = document.getElementById('ticket-placeholder-input');
-const ticketColorInput = document.getElementById('ticket-color-input');
-const previewTitle = document.getElementById('preview-title');
-const previewDesc = document.getElementById('preview-desc');
-const previewSelectPlaceholder = document.getElementById('preview-select-placeholder');
-const previewEmbed = document.getElementById('preview-embed');
+const ticketTitleInput = safeElem('ticket-title-input');
+const ticketDescInput = safeElem('ticket-desc-input');
+const ticketPlaceholderInput = safeElem('ticket-placeholder-input');
+const ticketColorInput = safeElem('ticket-color-input');
+const previewTitle = safeElem('preview-title');
+const previewDesc = safeElem('preview-desc');
+const previewSelectPlaceholder = safeElem('preview-select-placeholder');
+const previewEmbed = safeElem('preview-embed');
 
-if(ticketTitleInput) ticketTitleInput.addEventListener('input', (e) => { previewTitle.innerText = e.target.value || 'نظام التذاكر - FET STORE'; });
-if(ticketDescInput) ticketDescInput.addEventListener('input', (e) => { previewDesc.innerHTML = (e.target.value || '').replace(/\n/g, '<br>'); });
-if(ticketPlaceholderInput) ticketPlaceholderInput.addEventListener('input', (e) => { previewSelectPlaceholder.innerText = e.target.value || 'اختر نوع الخدمة المطلوبة - 📁'; });
-if(ticketColorInput) ticketColorInput.addEventListener('input', (e) => { previewEmbed.style.borderLeftColor = e.target.value; });
+if(ticketTitleInput && previewTitle) ticketTitleInput.addEventListener('input', (e) => { previewTitle.innerText = e.target.value || 'نظام التذاكر - FET STORE'; });
+if(ticketDescInput && previewDesc) ticketDescInput.addEventListener('input', (e) => { previewDesc.innerHTML = (e.target.value || '').replace(/\n/g, '<br>'); });
+if(ticketPlaceholderInput && previewSelectPlaceholder) ticketPlaceholderInput.addEventListener('input', (e) => { previewSelectPlaceholder.innerText = e.target.value || 'اختر نوع الخدمة المطلوبة - 📁'; });
+if(ticketColorInput && previewEmbed) ticketColorInput.addEventListener('input', (e) => { previewEmbed.style.borderLeftColor = e.target.value; });
 
-const updateProductInput = document.getElementById('update-product-input');
-const updateDescInput = document.getElementById('update-desc-input');
-const previewUpdateTitle = document.getElementById('preview-update-title');
-const previewUpdateDesc = document.getElementById('preview-update-desc');
+const updateProductInput = safeElem('update-product-input');
+const updateDescInput = safeElem('update-desc-input');
+const previewUpdateTitle = safeElem('preview-update-title');
+const previewUpdateDesc = safeElem('preview-update-desc');
 
-if(updateProductInput) updateProductInput.addEventListener('input', (e) => {
+if(updateProductInput && previewUpdateTitle) updateProductInput.addEventListener('input', (e) => {
     const val = e.target.value.trim();
     previewUpdateTitle.innerText = val ? `🚀 تم تحديث المنتج: ${val}` : '🚀 تم تحديث المنتج: FET INVENTORY V1.0';
 });
-if(updateDescInput) updateDescInput.addEventListener('input', (e) => { previewUpdateDesc.innerHTML = (e.target.value || '').replace(/\n/g, '<br>'); });
+if(updateDescInput && previewUpdateDesc) updateDescInput.addEventListener('input', (e) => { previewUpdateDesc.innerHTML = (e.target.value || '').replace(/\n/g, '<br>'); });
 
-const rulesTitleInput = document.getElementById('rules-title-input');
-const rulesSubtitleInput = document.getElementById('rules-subtitle-input');
-const rulesTextInput = document.getElementById('rules-text-input');
-const rulesColorInput = document.getElementById('rules-color-input');
-const rulesBannerCheckbox = document.getElementById('rules-banner-checkbox');
-const previewRulesTitle = document.getElementById('preview-rules-title');
-const previewRulesDesc = document.getElementById('preview-rules-desc');
-const previewRulesEmbed = document.getElementById('preview-rules-embed');
-const previewRulesBannerContainer = document.getElementById('preview-rules-banner-container');
+const rulesTitleInput = safeElem('rules-title-input');
+const rulesSubtitleInput = safeElem('rules-subtitle-input');
+const rulesTextInput = safeElem('rules-text-input');
+const rulesColorInput = safeElem('rules-color-input');
+const rulesBannerCheckbox = safeElem('rules-banner-checkbox');
+const previewRulesTitle = safeElem('preview-rules-title');
+const previewRulesDesc = safeElem('preview-rules-desc');
+const previewRulesEmbed = safeElem('preview-rules-embed');
+const previewRulesBannerContainer = safeElem('preview-rules-banner-container');
 
 function updateRulesPreview() {
     if (previewRulesTitle && rulesTitleInput) previewRulesTitle.innerText = rulesTitleInput.value || 'FET STORE سياسة';
@@ -859,32 +809,36 @@ async function loadStatus() {
         botData = data;
         currentConfig = data.config || {};
 
+        const botStatusDot = document.querySelector('.status-dot');
+        const botStatusText = safeElem('bot-status-text');
+        const botProfileCard = safeElem('bot-profile-card');
+        const botUsername = safeElem('bot-username');
+        const botAvatar = safeElem('bot-avatar');
+
         if (data.online) {
-            botStatusDot.className = 'status-dot online';
-            botStatusText.innerText = 'البوت متصل بنجاح 🟢';
-            if (data.bot_user) {
-                botUsername.innerText = data.bot_user;
-                if (data.bot_avatar) botAvatar.src = data.bot_avatar;
-                botProfileCard.classList.remove('hidden');
-            }
-            if (data.guilds && data.guilds.length > 0) populateDropdowns(data.guilds);
+            if (botStatusDot) botStatusDot.className = 'status-dot online';
+            if (botStatusText) botStatusText.innerText = 'البوت متصل بنجاح 🟢';
+            if (botProfileCard) botProfileCard.classList.remove('hidden');
+            if (botUsername && data.bot_user) botUsername.innerText = data.bot_user;
+            if (botAvatar && data.bot_avatar) botAvatar.src = data.bot_avatar;
+            if (data.guilds && Array.isArray(data.guilds)) populateDropdowns(data.guilds);
         } else {
-            botStatusDot.className = 'status-dot offline';
-            botStatusText.innerText = data.bot_error ? `خطأ: ${data.bot_error}` : 'البوت غير متصل 🔴 (يرجى إدخال التوكن)';
-            botProfileCard.classList.add('hidden');
+            if (botStatusDot) botStatusDot.className = 'status-dot offline';
+            if (botStatusText) botStatusText.innerText = data.bot_error ? `خطأ: ${data.bot_error}` : 'البوت غير متصل 🔴 (يرجى إدخال التوكن)';
+            if (botProfileCard) botProfileCard.classList.add('hidden');
         }
 
-        if (currentConfig.token && document.getElementById('token-input')) {
-            document.getElementById('token-input').value = currentConfig.token;
+        if (currentConfig.token && safeElem('token-input')) {
+            safeElem('token-input').value = currentConfig.token;
         }
-        if (currentConfig.staff_role_id && document.getElementById('staff-role-id-manual')) {
-            document.getElementById('staff-role-id-manual').value = currentConfig.staff_role_id;
+        if (currentConfig.staff_role_id && safeElem('staff-role-id-manual')) {
+            safeElem('staff-role-id-manual').value = currentConfig.staff_role_id;
         }
-        if (currentConfig.ticket_category_id && document.getElementById('category-id-manual')) {
-            document.getElementById('category-id-manual').value = currentConfig.ticket_category_id;
+        if (currentConfig.ticket_category_id && safeElem('category-id-manual')) {
+            safeElem('category-id-manual').value = currentConfig.ticket_category_id;
         }
-        if (currentConfig.closed_category_id && document.getElementById('closed-category-id-manual')) {
-            document.getElementById('closed-category-id-manual').value = currentConfig.closed_category_id;
+        if (currentConfig.closed_category_id && safeElem('closed-category-id-manual')) {
+            safeElem('closed-category-id-manual').value = currentConfig.closed_category_id;
         }
     } catch (e) {
         console.error('Error fetching status:', e);
@@ -892,106 +846,116 @@ async function loadStatus() {
 }
 
 function populateDropdowns(guilds) {
-    const ticketChannelSelect = document.getElementById('ticket-channel-select');
-    const updateChannelSelect = document.getElementById('update-channel-select');
-    const rulesChannelSelect = document.getElementById('rules-channel-select');
-    const staffRoleSelect = document.getElementById('staff-role-select');
-    const categorySelect = document.getElementById('ticket-category-select');
-    const closedCategorySelect = document.getElementById('closed-category-select');
+    const ticketChannelSelect = safeElem('ticket-channel-select');
+    const updateChannelSelect = safeElem('update-channel-select');
+    const rulesChannelSelect = safeElem('rules-channel-select');
+    const staffRoleSelect = safeElem('staff-role-select');
+    const categorySelect = safeElem('ticket-category-select');
+    const closedCategorySelect = safeElem('closed-category-select');
 
-    ticketChannelSelect.innerHTML = '<option value="">-- اختر الروم من سيرفرك --</option>';
-    updateChannelSelect.innerHTML = '<option value="">-- اختر الروم --</option>';
+    if (ticketChannelSelect) ticketChannelSelect.innerHTML = '<option value="">-- اختر الروم من سيرفرك --</option>';
+    if (updateChannelSelect) updateChannelSelect.innerHTML = '<option value="">-- اختر الروم --</option>';
     if (rulesChannelSelect) rulesChannelSelect.innerHTML = '<option value="">-- اختر الروم --</option>';
-    staffRoleSelect.innerHTML = '<option value="">-- اختر الرتبة التي تستقبل التكتات --</option>';
-    categorySelect.innerHTML = '<option value="">-- اختر قسم التكتات الفعالة --</option>';
+    if (staffRoleSelect) staffRoleSelect.innerHTML = '<option value="">-- اختر الرتبة التي تستقبل التكتات --</option>';
+    if (categorySelect) categorySelect.innerHTML = '<option value="">-- اختر قسم التكتات الفعالة --</option>';
     if (closedCategorySelect) closedCategorySelect.innerHTML = '<option value="">-- اختر قسم التكتات المغلقة --</option>';
 
     guilds.forEach(g => {
         if (g.channels) {
             g.channels.forEach(ch => {
-                ticketChannelSelect.add(new Option(`# ${ch.name} (${g.name})`, ch.id));
-                updateChannelSelect.add(new Option(`# ${ch.name} (${g.name})`, ch.id));
+                if (ticketChannelSelect) ticketChannelSelect.add(new Option(`# ${ch.name} (${g.name})`, ch.id));
+                if (updateChannelSelect) updateChannelSelect.add(new Option(`# ${ch.name} (${g.name})`, ch.id));
                 if (rulesChannelSelect) rulesChannelSelect.add(new Option(`# ${ch.name} (${g.name})`, ch.id));
             });
         }
         if (g.roles) {
             g.roles.forEach(r => {
-                staffRoleSelect.add(new Option(`@${r.name}`, r.id));
+                if (staffRoleSelect) staffRoleSelect.add(new Option(`@${r.name}`, r.id));
             });
         }
         if (g.categories) {
             g.categories.forEach(cat => {
-                categorySelect.add(new Option(`📁 ${cat.name}`, cat.id));
+                if (categorySelect) categorySelect.add(new Option(`📁 ${cat.name}`, cat.id));
                 if (closedCategorySelect) closedCategorySelect.add(new Option(`📁 ${cat.name}`, cat.id));
             });
         }
     });
 
-    if (currentConfig.ticket_channel_id) ticketChannelSelect.value = currentConfig.ticket_channel_id;
-    if (currentConfig.updates_channel_id) updateChannelSelect.value = currentConfig.updates_channel_id;
-    if (currentConfig.staff_role_id) staffRoleSelect.value = currentConfig.staff_role_id;
-    if (currentConfig.ticket_category_id) categorySelect.value = currentConfig.ticket_category_id;
+    if (currentConfig.ticket_channel_id && ticketChannelSelect) ticketChannelSelect.value = currentConfig.ticket_channel_id;
+    if (currentConfig.updates_channel_id && updateChannelSelect) updateChannelSelect.value = currentConfig.updates_channel_id;
+    if (currentConfig.staff_role_id && staffRoleSelect) staffRoleSelect.value = currentConfig.staff_role_id;
+    if (currentConfig.ticket_category_id && categorySelect) categorySelect.value = currentConfig.ticket_category_id;
     if (currentConfig.closed_category_id && closedCategorySelect) closedCategorySelect.value = currentConfig.closed_category_id;
 }
 
-document.getElementById('btn-send-ticket').addEventListener('click', async () => {
-    const channelId = document.getElementById('ticket-channel-select').value;
-    if (!channelId) return showToast('⚠️ يرجى اختيار الروم أولاً!');
-    const payload = {
-        channel_id: channelId,
-        title: ticketTitleInput.value,
-        description: ticketDescInput.value,
-        placeholder: ticketPlaceholderInput.value,
-        color: ticketColorInput.value
-    };
-    try {
-        showToast('⏳ جاري إرسال التكت إلى الديسكورد...');
-        const res = await fetch('/api/ticket/send', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(payload)
-        });
-        const result = await res.json();
-        if (result.status === 'ok') showToast('✅ تم إرسال رسالة التكت بنجاح إلى الديسكورد مع بنر التكت الجديد!');
-        else showToast('❌ خطأ: ' + result.message);
-    } catch (e) {
-        showToast('❌ تعذر الإرسال: ' + e.message);
-    }
-});
+const btnSendTicket = safeElem('btn-send-ticket');
+if (btnSendTicket) {
+    btnSendTicket.addEventListener('click', async () => {
+        const ticketChannelSelect = safeElem('ticket-channel-select');
+        const channelId = ticketChannelSelect ? ticketChannelSelect.value : '';
+        if (!channelId) return showToast('⚠️ يرجى اختيار الروم أولاً!');
+        const payload = {
+            channel_id: channelId,
+            title: ticketTitleInput ? ticketTitleInput.value : 'نظام التذاكر - FET STORE',
+            description: ticketDescInput ? ticketDescInput.value : '',
+            placeholder: ticketPlaceholderInput ? ticketPlaceholderInput.value : 'اختر نوع الخدمة المطلوبة - 📁',
+            color: ticketColorInput ? ticketColorInput.value : '#00ff41'
+        };
+        try {
+            showToast('⏳ جاري إرسال التكت إلى الديسكورد...');
+            const res = await fetch('/api/ticket/send', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(payload)
+            });
+            const result = await res.json();
+            if (result.status === 'ok') showToast('✅ تم إرسال رسالة التكت بنجاح إلى الديسكورد مع بنر التكت الجديد!');
+            else showToast('❌ خطأ: ' + result.message);
+        } catch (e) {
+            showToast('❌ تعذر الإرسال: ' + e.message);
+        }
+    });
+}
 
-document.getElementById('btn-send-update').addEventListener('click', async () => {
-    const channelId = document.getElementById('update-channel-select').value;
-    const productName = updateProductInput.value.trim();
-    const content = updateDescInput.value.trim();
-    const imageUrl = document.getElementById('update-image-input').value.trim();
-    if (!channelId || !productName || !content) return showToast('⚠️ يرجى اختيار الروم وكتابة اسم المنتج وتفاصيل التحديث!');
-    const payload = { channel_id: channelId, product_name: productName, content: content, image_url: imageUrl };
-    try {
-        showToast('⏳ جاري نشر التحديث في الديسكورد...');
-        const res = await fetch('/api/update/send', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(payload)
-        });
-        const result = await res.json();
-        if (result.status === 'ok') {
-            showToast('✅ تم نشر التحديث بنجاح مع لوقو المتجر!');
-            updateProductInput.value = ''; updateDescInput.value = '';
-        } else showToast('❌ خطأ: ' + result.message);
-    } catch (e) {
-        showToast('❌ تعذر النشر: ' + e.message);
-    }
-});
+const btnSendUpdate = safeElem('btn-send-update');
+if (btnSendUpdate) {
+    btnSendUpdate.addEventListener('click', async () => {
+        const updateChannelSelect = safeElem('update-channel-select');
+        const channelId = updateChannelSelect ? updateChannelSelect.value : '';
+        const productName = updateProductInput ? updateProductInput.value.trim() : '';
+        const content = updateDescInput ? updateDescInput.value.trim() : '';
+        const imageInp = safeElem('update-image-input');
+        const imageUrl = imageInp ? imageInp.value.trim() : '';
+        if (!channelId || !productName || !content) return showToast('⚠️ يرجى اختيار الروم وكتابة اسم المنتج وتفاصيل التحديث!');
+        const payload = { channel_id: channelId, product_name: productName, content: content, image_url: imageUrl };
+        try {
+            showToast('⏳ جاري نشر التحديث في الديسكورد...');
+            const res = await fetch('/api/update/send', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(payload)
+            });
+            const result = await res.json();
+            if (result.status === 'ok') {
+                showToast('✅ تم نشر التحديث بنجاح مع لوقو المتجر!');
+                if (updateProductInput) updateProductInput.value = '';
+                if (updateDescInput) updateDescInput.value = '';
+            } else showToast('❌ خطأ: ' + result.message);
+        } catch (e) {
+            showToast('❌ تعذر النشر: ' + e.message);
+        }
+    });
+}
 
-const btnSendRules = document.getElementById('btn-send-rules');
+const btnSendRules = safeElem('btn-send-rules');
 if (btnSendRules) {
     btnSendRules.addEventListener('click', async () => {
-        const rulesSelect = document.getElementById('rules-channel-select');
+        const rulesSelect = safeElem('rules-channel-select');
         const channelId = rulesSelect ? rulesSelect.value : '';
-        const title = rulesTitleInput.value.trim();
-        const subtitle = rulesSubtitleInput.value.trim();
-        const rulesText = rulesTextInput.value.trim();
-        const color = rulesColorInput.value;
+        const title = rulesTitleInput ? rulesTitleInput.value.trim() : '';
+        const subtitle = rulesSubtitleInput ? rulesSubtitleInput.value.trim() : '';
+        const rulesText = rulesTextInput ? rulesTextInput.value.trim() : '';
+        const color = rulesColorInput ? rulesColorInput.value : '#00ff41';
         const includeBanner = rulesBannerCheckbox ? rulesBannerCheckbox.checked : true;
         if (!channelId || !rulesText) return showToast('⚠️ يرجى اختيار الروم وكتابة بنود القوانين!');
         const payload = { channel_id: channelId, title: title, subtitle: subtitle, rules_text: rulesText, color: color, include_banner: includeBanner };
@@ -1011,31 +975,43 @@ if (btnSendRules) {
     });
 }
 
-document.getElementById('btn-save-settings').addEventListener('click', async () => {
-    const token = document.getElementById('token-input').value.trim();
-    const staffRole = document.getElementById('staff-role-select').value || document.getElementById('staff-role-id-manual').value.trim();
-    const category = document.getElementById('ticket-category-select').value || document.getElementById('category-id-manual').value.trim();
-    const closedCategory = (document.getElementById('closed-category-select') ? document.getElementById('closed-category-select').value : '') || document.getElementById('closed-category-id-manual').value.trim();
-    const payload = { token: token, staff_role_id: staffRole, ticket_category_id: category, closed_category_id: closedCategory };
-    try {
-        showToast('💾 جاري حفظ الإعدادات...');
-        const res = await fetch('/api/config/save', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(payload)
-        });
-        const result = await res.json();
-        if (result.status === 'ok') {
-            showToast('✅ تم حفظ الإعدادات بنجاح! يتم الآن ربط البوت...');
-            setTimeout(loadStatus, 2000);
-        }
-    } catch (e) {
-        showToast('❌ خطأ في الحفظ: ' + e.message);
-    }
-});
+const btnSaveSettings = safeElem('btn-save-settings');
+if (btnSaveSettings) {
+    btnSaveSettings.addEventListener('click', async () => {
+        const tokenInp = safeElem('token-input');
+        const staffSelect = safeElem('staff-role-select');
+        const staffManual = safeElem('staff-role-id-manual');
+        const catSelect = safeElem('ticket-category-select');
+        const catManual = safeElem('category-id-manual');
+        const closedSelect = safeElem('closed-category-select');
+        const closedManual = safeElem('closed-category-id-manual');
 
-const toggleTokenBtn = document.getElementById('toggle-token-btn');
-const tokenInput = document.getElementById('token-input');
+        const token = tokenInp ? tokenInp.value.trim() : '';
+        const staffRole = (staffSelect && staffSelect.value) || (staffManual ? staffManual.value.trim() : '');
+        const category = (catSelect && catSelect.value) || (catManual ? catManual.value.trim() : '');
+        const closedCategory = (closedSelect && closedSelect.value) || (closedManual ? closedManual.value.trim() : '');
+
+        const payload = { token: token, staff_role_id: staffRole, ticket_category_id: category, closed_category_id: closedCategory };
+        try {
+            showToast('💾 جاري حفظ الإعدادات...');
+            const res = await fetch('/api/config/save', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(payload)
+            });
+            const result = await res.json();
+            if (result.status === 'ok') {
+                showToast('✅ تم حفظ الإعدادات بنجاح! يتم الآن ربط البوت...');
+                setTimeout(loadStatus, 2000);
+            }
+        } catch (e) {
+            showToast('❌ خطأ في الحفظ: ' + e.message);
+        }
+    });
+}
+
+const toggleTokenBtn = safeElem('toggle-token-btn');
+const tokenInput = safeElem('token-input');
 if (toggleTokenBtn && tokenInput) {
     toggleTokenBtn.addEventListener('click', () => {
         if (tokenInput.type === 'password') { tokenInput.type = 'text'; toggleTokenBtn.innerText = 'إخفاء'; }
@@ -1044,17 +1020,22 @@ if (toggleTokenBtn && tokenInput) {
 }
 
 function showToast(msg) {
-    const toast = document.getElementById('toast');
-    const toastMsg = document.getElementById('toast-msg');
-    toastMsg.innerText = msg;
-    toast.classList.remove('hidden');
-    setTimeout(() => { toast.classList.add('hidden'); }, 3500);
+    const toast = safeElem('toast');
+    const toastMsg = safeElem('toast-msg');
+    if (toast && toastMsg) {
+        toastMsg.innerText = msg;
+        toast.classList.remove('hidden');
+        setTimeout(() => { toast.classList.add('hidden'); }, 3500);
+    }
 }
 
 document.addEventListener('DOMContentLoaded', () => {
     loadStatus();
-    setInterval(loadStatus, 6000);
+    setInterval(loadStatus, 5000);
 });
+if (document.readyState === 'complete' || document.readyState === 'interactive') {
+    loadStatus();
+}
     </script>
 </body>
 </html>
@@ -1114,32 +1095,31 @@ def api_config_save():
     if new_token and (new_token != old_token or not bot.is_ready()):
         start_bot_in_background(new_token)
         
-    return jsonify({"status": "ok", "message": "Settings saved successfully!"})
+    return jsonify({"status": "ok", "message": "تم حفظ الإعدادات بنجاح!"})
 
 @app.route("/api/ticket/send", methods=["POST"])
 def api_ticket_send():
     if not bot.is_ready():
-        return jsonify({"status": "error", "message": "البوت غير متصل بالديسكورد! يرجى إدخال التوكن في الإعدادات."}), 400
+        return jsonify({"status": "error", "message": "البوت غير متصل بالديسكورد! يرجى التأكد من التوكن."}), 400
         
     data = request.json or {}
     channel_id = int(data.get("channel_id")) if data.get("channel_id") else None
     if not channel_id:
-        return jsonify({"status": "error", "message": "يرجى اختيار الروم المطلوب إرسال التكت فيها."}), 400
+        return jsonify({"status": "error", "message": "يرجى اختيار الروم."}), 400
 
     channel = bot.get_channel(channel_id)
     if not channel:
-        return jsonify({"status": "error", "message": "الروم غير موجودة أو البوت لا يمتلك صلاحية الوصول لها."}), 404
+        return jsonify({"status": "error", "message": "الروم غير موجودة أو لا يمتلك البوت صلاحية الوصول لها."}), 404
 
-    cfg = load_config()
-    title = data.get("title", cfg.get("ticket_title", "نظام التذاكر - FET STORE"))
-    description = data.get("description", cfg.get("ticket_description", ""))
-    placeholder = data.get("placeholder", cfg.get("ticket_placeholder", "اختر نوع الخدمة المطلوبة - 📁"))
-    color_hex = data.get("color", cfg.get("ticket_color", "#00ff41"))
+    title = data.get("title", "نظام التذاكر - FET STORE")
+    desc = data.get("description", "")
+    placeholder = data.get("placeholder", "اختر نوع الخدمة المطلوبة - 📁")
+    color_hex = data.get("color", "#00ff41")
 
     async def send_panel():
         embed = discord.Embed(
             title=title,
-            description=description,
+            description=desc,
             color=discord.Color.from_str(color_hex)
         )
         
@@ -1153,9 +1133,12 @@ def api_ticket_send():
         if os.path.exists(logo_path):
             files.append(discord.File(logo_path, filename="logo_circle.png"))
             embed.set_thumbnail(url="attachment://logo_circle.png")
-            embed.set_author(name="FET STORE | Official Ticket System", icon_url="attachment://logo_circle.png")
+            embed.set_author(name="FET STORE - Official Ticket System", icon_url="attachment://logo_circle.png")
             embed.set_footer(text="FET STORE | Best Quality Products", icon_url="attachment://logo_circle.png")
-            
+        else:
+            embed.set_author(name="FET STORE - Official Ticket System")
+            embed.set_footer(text="FET STORE | Best Quality Products")
+
         if os.path.exists(banner_path):
             files.append(discord.File(banner_path, filename="ticket_banner.png"))
             embed.set_image(url="attachment://ticket_banner.png")
@@ -1169,7 +1152,7 @@ def api_ticket_send():
     future = asyncio.run_coroutine_threadsafe(send_panel(), bot.loop)
     try:
         future.result(timeout=10)
-        return jsonify({"status": "ok", "message": "تم إرسال التكت بنجاح إلى الديسكورد مع بنر التكت الجديد واللوقو الدائري!"})
+        return jsonify({"status": "ok", "message": "تم إرسال لوحة التذاكر إلى الديسكورد بنجاح!"})
     except Exception as e:
         return jsonify({"status": "error", "message": str(e)}), 500
 
