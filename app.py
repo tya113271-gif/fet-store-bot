@@ -416,7 +416,7 @@ body { background-color:var(--bg-dark); color:var(--text-white); min-height:100v
         </div>
         <div class="header-status">
             <div class="status-indicator" id="bot-status-badge">
-                <span class="status-dot offline"></span>
+                <span class="status-dot offline" id="bot-status-dot"></span>
                 <span class="status-text" id="bot-status-text">جاري فحص الاتصال...</span>
             </div>
             <div class="bot-info-card hidden" id="bot-profile-card">
@@ -739,6 +739,11 @@ function safeElem(id) {
     return document.getElementById(id);
 }
 
+function formatLines(text) {
+    if (!text) return '';
+    return text.split(String.fromCharCode(10)).join('<br>');
+}
+
 document.querySelectorAll('.nav-btn').forEach(btn => {
     btn.addEventListener('click', () => {
         document.querySelectorAll('.nav-btn').forEach(b => b.classList.remove('active'));
@@ -760,7 +765,7 @@ const previewSelectPlaceholder = safeElem('preview-select-placeholder');
 const previewEmbed = safeElem('preview-embed');
 
 if(ticketTitleInput && previewTitle) ticketTitleInput.addEventListener('input', (e) => { previewTitle.innerText = e.target.value || 'نظام التذاكر - FET STORE'; });
-if(ticketDescInput && previewDesc) ticketDescInput.addEventListener('input', (e) => { previewDesc.innerHTML = (e.target.value || '').replace(/\n/g, '<br>'); });
+if(ticketDescInput && previewDesc) ticketDescInput.addEventListener('input', (e) => { previewDesc.innerHTML = formatLines(e.target.value); });
 if(ticketPlaceholderInput && previewSelectPlaceholder) ticketPlaceholderInput.addEventListener('input', (e) => { previewSelectPlaceholder.innerText = e.target.value || 'اختر نوع الخدمة المطلوبة - 📁'; });
 if(ticketColorInput && previewEmbed) ticketColorInput.addEventListener('input', (e) => { previewEmbed.style.borderLeftColor = e.target.value; });
 
@@ -771,9 +776,9 @@ const previewUpdateDesc = safeElem('preview-update-desc');
 
 if(updateProductInput && previewUpdateTitle) updateProductInput.addEventListener('input', (e) => {
     const val = e.target.value.trim();
-    previewUpdateTitle.innerText = val ? `🚀 تم تحديث المنتج: ${val}` : '🚀 تم تحديث المنتج: FET INVENTORY V1.0';
+    previewUpdateTitle.innerText = val ? '🚀 تم تحديث المنتج: ' + val : '🚀 تم تحديث المنتج: FET INVENTORY V1.0';
 });
-if(updateDescInput && previewUpdateDesc) updateDescInput.addEventListener('input', (e) => { previewUpdateDesc.innerHTML = (e.target.value || '').replace(/\n/g, '<br>'); });
+if(updateDescInput && previewUpdateDesc) updateDescInput.addEventListener('input', (e) => { previewUpdateDesc.innerHTML = formatLines(e.target.value); });
 
 const rulesTitleInput = safeElem('rules-title-input');
 const rulesSubtitleInput = safeElem('rules-subtitle-input');
@@ -789,8 +794,8 @@ function updateRulesPreview() {
     if (previewRulesTitle && rulesTitleInput) previewRulesTitle.innerText = rulesTitleInput.value || 'FET STORE سياسة';
     if (previewRulesDesc && rulesTextInput) {
         const sub = rulesSubtitleInput ? rulesSubtitleInput.value.trim() : '';
-        const rules = (rulesTextInput.value || '').replace(/\n/g, '<br>');
-        previewRulesDesc.innerHTML = sub ? `${sub}<br><br>${rules}` : rules;
+        const rules = formatLines(rulesTextInput.value);
+        previewRulesDesc.innerHTML = sub ? sub + '<br><br>' + rules : rules;
     }
     if (previewRulesEmbed && rulesColorInput) previewRulesEmbed.style.borderLeftColor = rulesColorInput.value;
     if (previewRulesBannerContainer && rulesBannerCheckbox) previewRulesBannerContainer.style.display = rulesBannerCheckbox.checked ? 'block' : 'none';
@@ -804,12 +809,14 @@ if (rulesBannerCheckbox) rulesBannerCheckbox.addEventListener('change', updateRu
 
 async function loadStatus() {
     try {
+        console.log('FET DASHBOARD: Fetching /api/status...');
         const res = await fetch('/api/status');
         const data = await res.json();
+        console.log('FET DASHBOARD: Status data received:', data);
         botData = data;
         currentConfig = data.config || {};
 
-        const botStatusDot = document.querySelector('.status-dot');
+        const botStatusDot = safeElem('bot-status-dot') || document.querySelector('.status-dot');
         const botStatusText = safeElem('bot-status-text');
         const botProfileCard = safeElem('bot-profile-card');
         const botUsername = safeElem('bot-username');
