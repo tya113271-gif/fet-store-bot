@@ -39,6 +39,14 @@ for asset_name, b64_data in EMBEDDED_ASSETS.items():
         except Exception as e:
             logger.error(f"Error restoring asset {asset_name}: {e}")
 
+DEFAULT_DEPARTMENTS = [
+    {"id": "buy_product", "label": "شراء منتج", "emoji": "🟡", "prefix": "🟡・شراء-منتج"},
+    {"id": "support_tech", "label": "الدعم الفني والمساعدة", "emoji": "🛠️", "prefix": "🛠️・دعم-فني"},
+    {"id": "complaints", "label": "الشكاوى والاقتراحات", "emoji": "📩", "prefix": "📩・شكاوى"},
+    {"id": "claim_product", "label": "استلام وتفعيل المنتجات", "emoji": "🔑", "prefix": "🔑・استلام"},
+    {"id": "general_inquiry", "label": "الاستفسارات العامة", "emoji": "💬", "prefix": "💬・استفسار"}
+]
+
 def load_config():
     cfg = {}
     if os.path.exists(CONFIG_PATH):
@@ -52,6 +60,9 @@ def load_config():
     if env_token:
         cfg["token"] = env_token.strip()
         
+    if "departments" not in cfg or not cfg["departments"]:
+        cfg["departments"] = DEFAULT_DEPARTMENTS
+        
     return cfg
 
 def save_config(cfg):
@@ -63,13 +74,8 @@ def save_config(cfg):
 app = Flask(__name__, static_folder="static", template_folder="templates")
 app.config["SECRET_KEY"] = "fet_store_secret_2026"
 
-# [[ Discord Bot Setup ]] #
-intents = discord.Intents.default()
-intents.guilds = True
-intents.messages = True
-intents.message_content = True
-
-bot = commands.Bot(command_prefix="!", intents=intents)
+# [[ Discord Bot Setup & Handlers ]] #
+bot = None
 bot_error_msg = None
 bot_thread_active = False
 
@@ -155,11 +161,11 @@ class CloseTicketView(discord.ui.View):
                 except Exception as e:
                     logger.warning(f"Could not set permission for member {target}: {e}")
 
-        # 2. نقل التذكرة إلى قسم التكتات المغلقة وتغيير اسمها
+        # 2. نقل التذكرة إلى قسم التكتات المغلقة وتغيير اسمها مع الاحتفاظ بالاسم الأصلي
         target_closed_category = get_target_category(guild, "closed_category_id", ["تكتات مغلقة", "تذاكر مغلقة", "closed tickets", "closed", "مغلق"])
         
-        orig_suffix = channel.name.replace("ticket-", "").replace("closed-", "")
-        new_name = f"closed-{orig_suffix}"
+        clean_name = channel.name.replace("closed-", "")
+        new_name = f"closed-{clean_name}"[:95]
         try:
             if target_closed_category:
                 await channel.edit(category=target_closed_category, name=new_name)
@@ -221,13 +227,12 @@ class ClosedTicketActionView(discord.ui.View):
                     logger.warning(f"Could not restore owner permissions: {e}")
 
         active_cat = get_target_category(guild, "ticket_category_id", ["تكتات فعالة", "تذاكر فعالة", "active tickets", "tickets", "تذاكر"])
-        orig_suffix = channel.name.replace("closed-", "").replace("ticket-", "")
-        new_name = f"ticket-{orig_suffix}"
+        restored_name = channel.name.replace("closed-", "")[:95]
         try:
             if active_cat:
-                await channel.edit(category=active_cat, name=new_name)
+                await channel.edit(category=active_cat, name=restored_name)
             else:
-                await channel.edit(name=new_name)
+                await channel.edit(name=restored_name)
         except Exception as e:
             logger.warning(f"Could not rename/move channel on reopen: {e}")
 
@@ -349,15 +354,21 @@ class ReviewPromptView(discord.ui.View):
     async def open_review_modal_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
         await interaction.response.send_modal(ReviewModal())
 
+# [[ Custom Ticket Departments & Dropdown ]] #
 class TicketDropdown(discord.ui.Select):
-    def __init__(self, placeholder="📂 - اختر نوع الخدمة المطلوبة"):
-        options = [
-            discord.SelectOption(label="قسم شراء ملفات ومودات", description="شراء سكربتات ومودات حصرية", emoji="🛒", value="buy_scripts"),
-            discord.SelectOption(label="قسم الدعم الفني والمساعدة", description="استفسارات ومساعدة تقنية وتثبيت", emoji="🛠️", value="support_tech"),
-            discord.SelectOption(label="قسم الشكاوى والاقتراحات", description="تقديم شكوى أو اقتراح لإدارة المتجر", emoji="📩", value="complaints"),
-            discord.SelectOption(label="قسم استلام وتفعيل المنتجات", description="استلام كود التفعيل أو المفتاح", emoji="🔑", value="claim_product"),
-            discord.SelectOption(label="قسم الاستفسارات العامة", description="أي استفسار أو طلب خاص", emoji="💬", value="general_inquiry"),
-        ]
+    def __init__(self, placeholder="📂 - اختر نوع الخدمة المطلوبة", departments=None):
+        if not departments:
+            cfg = load_config()
+            departments = cfg.get("departments", DEFAULT_DEPARTMENTS)
+            
+        options = []
+        for i, d in enumerate(departments):
+            options.append(discord.SelectOption(
+                label=d.get("label", f"قسم {i+1}"),
+                emoji=d.get("emoji") or None,
+                value=d.get("id", f"dept_{i}")
+            ))
+            
         super().__init__(
             placeholder=placeholder,
             min_values=1,
@@ -370,12 +381,15 @@ class TicketDropdown(discord.ui.Select):
         guild = interaction.guild
         user = interaction.user
         selected_val = self.values[0]
-        selected_opt = next((opt for opt in self.options if opt.value == selected_val), None)
-        dept_name = selected_opt.label if selected_opt else selected_val
-
-        active_cat = get_target_category(guild, "ticket_category_id", ["تكتات فعالة", "تذاكر فعالة", "active tickets", "tickets", "تذاكر"])
         
-        # Check existing ticket
+        cfg = load_config()
+        departments = cfg.get("departments", DEFAULT_DEPARTMENTS)
+        dept_item = next((d for d in departments if d.get("id") == selected_val), None)
+        
+        dept_name = dept_item["label"] if dept_item else selected_val
+        prefix = dept_item.get("prefix", "🟡・تذكرة") if dept_item else "🟡・تذكرة"
+
+        # Check existing active ticket
         for ch in guild.text_channels:
             if ch.topic and f"FET_TICKET_OWNER:{user.id}" in ch.topic and not ch.name.startswith("closed"):
                 await interaction.response.send_message(f"⚠️ لديك تذكرة مفتوحة بالفعل: {ch.mention}", ephemeral=True)
@@ -383,13 +397,19 @@ class TicketDropdown(discord.ui.Select):
 
         await interaction.response.defer(ephemeral=True)
 
+        active_cat = get_target_category(guild, "ticket_category_id", ["تكتات فعالة", "تذاكر فعالة", "active tickets", "tickets", "تذاكر"])
+        
+        # Prepare channel name: e.g. 🟡・شراء-منتج-king
+        safe_prefix = prefix.strip().replace(" ", "-")
+        safe_user = re.sub(r'[^\w\u0600-\u06FF-]', '', user.name).lower()[:15]
+        channel_name = f"{safe_prefix}-{safe_user}"[:95]
+
         overwrites = {
             guild.default_role: discord.PermissionOverwrite(view_channel=False),
             user: discord.PermissionOverwrite(view_channel=True, send_messages=True, attach_files=True, embed_links=True, read_message_history=True),
             guild.me: discord.PermissionOverwrite(view_channel=True, send_messages=True, manage_channels=True, manage_permissions=True)
         }
 
-        cfg = load_config()
         staff_role_id = cfg.get("staff_role_id", "")
         if staff_role_id:
             try:
@@ -398,9 +418,6 @@ class TicketDropdown(discord.ui.Select):
                     overwrites[staff_role] = discord.PermissionOverwrite(view_channel=True, send_messages=True, attach_files=True, embed_links=True, read_message_history=True)
             except:
                 pass
-
-        ticket_code = f"{user.name[:4]}-{str(user.id)[-4:]}".lower()
-        channel_name = f"ticket-{ticket_code}"
 
         try:
             if active_cat:
@@ -417,8 +434,16 @@ class TicketDropdown(discord.ui.Select):
                     topic=f"FET_TICKET_OWNER:{user.id} | القسم: {dept_name}"
                 )
         except Exception as e:
-            await interaction.followup.send(f"❌ حدث خطأ أثناء إنشاء روم التذكرة: {e}", ephemeral=True)
-            return
+            logger.warning(f"Could not create channel with name {channel_name}: {e}. Trying fallback...")
+            fallback_name = f"ticket-{safe_user}"
+            try:
+                if active_cat:
+                    ticket_chan = await guild.create_text_channel(name=fallback_name, category=active_cat, overwrites=overwrites, topic=f"FET_TICKET_OWNER:{user.id} | القسم: {dept_name}")
+                else:
+                    ticket_chan = await guild.create_text_channel(name=fallback_name, overwrites=overwrites, topic=f"FET_TICKET_OWNER:{user.id} | القسم: {dept_name}")
+            except Exception as e2:
+                await interaction.followup.send(f"❌ حدث خطأ أثناء إنشاء روم التذكرة: {e2}", ephemeral=True)
+                return
 
         embed = discord.Embed(
             title=f"🎟️ تذكرة جديدة | {dept_name}",
@@ -447,67 +472,78 @@ class TicketDropdown(discord.ui.Select):
         await interaction.followup.send(f"✅ تم فتح تذكرتك بنجاح: {ticket_chan.mention}", ephemeral=True)
 
 class TicketPanelView(discord.ui.View):
-    def __init__(self, placeholder="📂 - اختر نوع الخدمة المطلوبة"):
+    def __init__(self, placeholder="📂 - اختر نوع الخدمة المطلوبة", departments=None):
         super().__init__(timeout=None)
-        self.add_item(TicketDropdown(placeholder=placeholder))
+        self.add_item(TicketDropdown(placeholder=placeholder, departments=departments))
 
-@bot.event
-async def on_message(message: discord.Message):
-    if message.author.bot or not message.guild:
-        return
-
-    content_clean = message.content.strip().lower()
-    trigger_words = ["تقيم", "تقييم", "!تقيم", "!تقييم"]
-    
-    if content_clean in trigger_words or any(content_clean == tw for tw in trigger_words):
-        cfg = load_config()
-        staff_role_id = cfg.get("staff_role_id", "")
-        if is_user_staff(message.author, message.guild, staff_role_id):
-            try:
-                await message.delete()
-            except Exception as e:
-                logger.warning(f"Could not delete trigger message: {e}")
-
-            embed = discord.Embed(
-                title="⭐ تقييم مستوى الخدمة والدعم الفني | FET STORE",
-                description=(
-                    "عزيزنا العميل، رأيك يهمنا جداً لتطوير خدماتنا ومساعدتنا على تقديم الأفضل لك دائماً! 💚\n\n"
-                    "يرجى التكرم بالضغط على الزر أدناه وإبداء رأيك وتقييمك لتعاملنا معك:"
-                ),
-                color=discord.Color.from_str("#00ff41")
-            )
-            files = []
-            logo_path = os.path.join(ASSETS_DIR, "logo_circle.png")
-            if not os.path.exists(logo_path):
-                logo_path = os.path.join(ASSETS_DIR, "logo.png")
-            if os.path.exists(logo_path):
-                files.append(discord.File(logo_path, filename="logo_circle.png"))
-                embed.set_thumbnail(url="attachment://logo_circle.png")
-                embed.set_footer(text="FET STORE | خدمة العملاء", icon_url="attachment://logo_circle.png")
-            else:
-                embed.set_footer(text="FET STORE | خدمة العملاء")
-
-            banner_path = os.path.join(ASSETS_DIR, "review_banner.png")
-            if os.path.exists(banner_path):
-                files.append(discord.File(banner_path, filename="review_banner.png"))
-                embed.set_image(url="attachment://review_banner.png")
-
-            if files:
-                await message.channel.send(embed=embed, files=files, view=ReviewPromptView())
-            else:
-                await message.channel.send(embed=embed, view=ReviewPromptView())
+def setup_bot_handlers(b):
+    @b.event
+    async def on_message(message: discord.Message):
+        if message.author.bot or not message.guild:
             return
 
-    await bot.process_commands(message)
+        content_clean = message.content.strip().lower()
+        trigger_words = ["تقيم", "تقييم", "!تقيم", "!تقييم"]
+        
+        if content_clean in trigger_words or any(content_clean == tw for tw in trigger_words):
+            cfg = load_config()
+            staff_role_id = cfg.get("staff_role_id", "")
+            if is_user_staff(message.author, message.guild, staff_role_id):
+                try:
+                    await message.delete()
+                except Exception as e:
+                    logger.warning(f"Could not delete trigger message: {e}")
 
-@bot.event
-async def on_ready():
-    logger.info(f"Bot connected as {bot.user} (ID: {bot.user.id})")
-    bot.add_view(TicketPanelView())
-    bot.add_view(CloseTicketView())
-    bot.add_view(ClosedTicketActionView())
-    bot.add_view(ReviewPromptView())
-    await bot.change_presence(activity=discord.Game(name="FET STORE | Dashboard Ready"))
+                embed = discord.Embed(
+                    title="⭐ تقييم مستوى الخدمة والدعم الفني | FET STORE",
+                    description=(
+                        "عزيزنا العميل، رأيك يهمنا جداً لتطوير خدماتنا ومساعدتنا على تقديم الأفضل لك دائماً! 💚\n\n"
+                        "يرجى التكرم بالضغط على الزر أدناه وإبداء رأيك وتقييمك لتعاملنا معك:"
+                    ),
+                    color=discord.Color.from_str("#00ff41")
+                )
+                files = []
+                logo_path = os.path.join(ASSETS_DIR, "logo_circle.png")
+                if not os.path.exists(logo_path):
+                    logo_path = os.path.join(ASSETS_DIR, "logo.png")
+                if os.path.exists(logo_path):
+                    files.append(discord.File(logo_path, filename="logo_circle.png"))
+                    embed.set_thumbnail(url="attachment://logo_circle.png")
+                    embed.set_footer(text="FET STORE | خدمة العملاء", icon_url="attachment://logo_circle.png")
+                else:
+                    embed.set_footer(text="FET STORE | خدمة العملاء")
+
+                banner_path = os.path.join(ASSETS_DIR, "review_banner.png")
+                if os.path.exists(banner_path):
+                    files.append(discord.File(banner_path, filename="review_banner.png"))
+                    embed.set_image(url="attachment://review_banner.png")
+
+                if files:
+                    await message.channel.send(embed=embed, files=files, view=ReviewPromptView())
+                else:
+                    await message.channel.send(embed=embed, view=ReviewPromptView())
+                return
+
+        await b.process_commands(message)
+
+    @b.event
+    async def on_ready():
+        logger.info(f"Bot connected as {b.user} (ID: {b.user.id})")
+        cfg = load_config()
+        depts = cfg.get("departments", DEFAULT_DEPARTMENTS)
+        b.add_view(TicketPanelView(departments=depts))
+        b.add_view(CloseTicketView())
+        b.add_view(ClosedTicketActionView())
+        b.add_view(ReviewPromptView())
+        await b.change_presence(activity=discord.Game(name="FET STORE | Dashboard Ready"))
+
+# Initialize default bot
+intents = discord.Intents.default()
+intents.guilds = True
+intents.messages = True
+intents.message_content = True
+bot = commands.Bot(command_prefix="!", intents=intents)
+setup_bot_handlers(bot)
 
 # [[ Built-in HTML / UI Templates ]] #
 HTML_TEMPLATE = """<!DOCTYPE html>
@@ -573,6 +609,7 @@ body { background-color:var(--bg-dark); color:var(--text-white); min-height:100v
 .btn-secondary { background:transparent; border:1px solid var(--border-color); color:var(--text-white); padding:8px 14px; border-radius:6px; font-size:12px; font-weight:700; cursor:pointer; }
 .token-wrapper { display:flex; gap:8px; }
 .mt-2 { margin-top:8px; }
+.mt-3 { margin-top:16px; }
 .form-hint { display:block; font-size:11px; color:var(--text-muted); margin-top:4px; }
 .discord-preview-box { background:var(--discord-bg); border-radius:8px; padding:16px; }
 .discord-message { display:flex; gap:14px; }
@@ -660,7 +697,7 @@ body { background-color:var(--bg-dark); color:var(--text-white); min-height:100v
                         </div>
                         <div class="form-group">
                             <label>📄 وصف التكت (Description):</label>
-                            <textarea id="ticket-desc-input" class="form-input" rows="6">عزيزي العضو / Dear Member
+                            <textarea id="ticket-desc-input" class="form-input" rows="5">عزيزي العضو / Dear Member
 
 من خلال هذه القائمة يمكنك:
 • اختيار القسم المناسب لفتح تذكرة دعم فني
@@ -675,6 +712,19 @@ body { background-color:var(--bg-dark); color:var(--text-white); min-height:100v
                             <label>🎨 لون الإطار (Hex Color):</label>
                             <input type="color" id="ticket-color-input" class="color-picker" value="#00ff41">
                         </div>
+
+                        <!-- أقسام التذاكر وبداية اسم الروم -->
+                        <div class="form-group mt-3" style="border-top:1px solid var(--border-color); padding-top:16px;">
+                            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px;">
+                                <label style="margin:0; font-size:14px; color:var(--neon-green); font-weight:800;">🏷️ تخصيص أقسام التذاكر وبداية اسم الروم:</label>
+                                <button type="button" id="btn-add-dept" class="btn-secondary" style="background:rgba(0,255,65,0.15); color:var(--neon-green); border-color:var(--neon-green); padding:4px 12px; font-size:12px;">➕ إضافة قسم</button>
+                            </div>
+                            <small class="form-hint" style="margin-bottom:12px; display:block;">
+                                حدد اسم كل قسم، إيموجي القائمة، وبداية اسم الروم (مثل: <code>🟡・شراء-منتج</code>) ليفتح باسم <code>🟡・شراء-منتج-username</code> بدون وصف.
+                            </small>
+                            <div id="departments-container" style="display:flex; flex-direction:column; gap:8px;"></div>
+                        </div>
+
                         <button id="btn-send-ticket" class="btn-primary">
                             <span>🚀 إرسال / تحديث التكت في الديسكورد</span>
                         </button>
@@ -713,7 +763,7 @@ body { background-color:var(--bg-dark); color:var(--text-white); min-height:100v
                                             <span>FET STORE | Best Quality Products</span>
                                         </div>
                                     </div>
-                                    <div class="discord-select-menu">
+                                    <div class="discord-select-menu" id="preview-select-box">
                                         <span class="select-text" id="preview-select-placeholder">اختر نوع الخدمة المطلوبة - 📁</span>
                                         <span class="select-arrow">▼</span>
                                     </div>
@@ -1010,6 +1060,73 @@ if (rulesTextInput) rulesTextInput.addEventListener('input', updateRulesPreview)
 if (rulesColorInput) rulesColorInput.addEventListener('input', updateRulesPreview);
 if (rulesBannerCheckbox) rulesBannerCheckbox.addEventListener('change', updateRulesPreview);
 
+// [[ Departments Dynamic Management ]] //
+let departmentsList = [
+    { id: "buy_product", label: "شراء منتج", emoji: "🟡", prefix: "🟡・شراء-منتج" },
+    { id: "support_tech", label: "الدعم الفني والمساعدة", emoji: "🛠️", prefix: "🛠️・دعم-فني" },
+    { id: "complaints", label: "الشكاوى والاقتراحات", emoji: "📩", prefix: "📩・شكاوى" },
+    { id: "claim_product", label: "استلام وتفعيل المنتجات", emoji: "🔑", prefix: "🔑・استلام" },
+    { id: "general_inquiry", label: "الاستفسارات العامة", emoji: "💬", prefix: "💬・استفسار" }
+];
+
+function renderDepartments() {
+    const container = safeElem('departments-container');
+    if (!container) return;
+    container.innerHTML = '';
+
+    departmentsList.forEach((dept, index) => {
+        const row = document.createElement('div');
+        row.className = 'dept-row';
+        row.dataset.index = index;
+        row.style.cssText = 'display:flex; gap:8px; align-items:center; background:var(--bg-input); padding:8px; border-radius:8px; border:1px solid rgba(0,255,65,0.2);';
+        
+        row.innerHTML = `
+            <input type="text" class="dept-emoji form-input" value="${dept.emoji || '🟡'}" style="width:48px; text-align:center; padding:6px; font-size:14px;" title="الإيموجي">
+            <input type="text" class="dept-label form-input" value="${dept.label}" placeholder="اسم القسم" style="flex:1; padding:6px; font-size:13px;" title="اسم القسم الظاهر للزبون">
+            <input type="text" class="dept-prefix form-input" value="${dept.prefix || ('🟡・' + dept.label)}" placeholder="بداية اسم الروم" style="flex:1.2; padding:6px; font-size:13px;" title="اسم الروم عند فتح التكت (مثال: 🟡・شراء-منتج)">
+            <button type="button" class="btn-del-dept btn-secondary" style="color:var(--danger); border-color:var(--danger); padding:6px 10px; cursor:pointer;" title="حذف هذا القسم">🗑️</button>
+        `;
+
+        row.querySelector('.dept-emoji').addEventListener('input', (e) => {
+            departmentsList[index].emoji = e.target.value.trim();
+        });
+        row.querySelector('.dept-label').addEventListener('input', (e) => {
+            departmentsList[index].label = e.target.value;
+            const prefixInp = row.querySelector('.dept-prefix');
+            if (!prefixInp.dataset.manual) {
+                const autoPrefix = (departmentsList[index].emoji || '🟡') + '・' + e.target.value.trim().split(' ').join('-');
+                prefixInp.value = autoPrefix;
+                departmentsList[index].prefix = autoPrefix;
+            }
+        });
+        row.querySelector('.dept-prefix').addEventListener('input', (e) => {
+            e.target.dataset.manual = 'true';
+            departmentsList[index].prefix = e.target.value;
+        });
+        row.querySelector('.btn-del-dept').addEventListener('click', () => {
+            if (departmentsList.length <= 1) return showToast('⚠️ يجب ترك قسم واحد على الأقل!');
+            departmentsList.splice(index, 1);
+            renderDepartments();
+        });
+
+        container.appendChild(row);
+    });
+}
+
+const btnAddDept = safeElem('btn-add-dept');
+if (btnAddDept) {
+    btnAddDept.addEventListener('click', () => {
+        const newId = 'dept_' + Math.random().toString(36).substr(2, 6);
+        departmentsList.push({
+            id: newId,
+            label: 'قسم جديد',
+            emoji: '🟡',
+            prefix: '🟡・قسم-جديد'
+        });
+        renderDepartments();
+    });
+}
+
 async function loadStatus() {
     try {
         console.log('FET DASHBOARD: Fetching /api/status...');
@@ -1052,6 +1169,13 @@ async function loadStatus() {
         }
         if (currentConfig.reviews_channel_id && safeElem('reviews-channel-id-manual')) {
             safeElem('reviews-channel-id-manual').value = currentConfig.reviews_channel_id;
+        }
+
+        if (currentConfig.departments && Array.isArray(currentConfig.departments) && currentConfig.departments.length > 0) {
+            departmentsList = currentConfig.departments;
+            renderDepartments();
+        } else {
+            renderDepartments();
         }
     } catch (e) {
         console.error('Error fetching status:', e);
@@ -1122,12 +1246,15 @@ if (btnSendTicket) {
         const ticketChannelSelect = safeElem('ticket-channel-select');
         const channelId = ticketChannelSelect ? ticketChannelSelect.value : '';
         if (!channelId) return showToast('⚠️ يرجى اختيار الروم أولاً!');
+        
+        // Gather current departments list
         const payload = {
             channel_id: channelId,
             title: ticketTitleInput ? ticketTitleInput.value : 'نظام التذاكر - FET STORE',
             description: ticketDescInput ? ticketDescInput.value : '',
             placeholder: ticketPlaceholderInput ? ticketPlaceholderInput.value : 'اختر نوع الخدمة المطلوبة - 📁',
-            color: ticketColorInput ? ticketColorInput.value : '#00ff41'
+            color: ticketColorInput ? ticketColorInput.value : '#00ff41',
+            departments: departmentsList
         };
         try {
             showToast('⏳ جاري إرسال التكت إلى الديسكورد...');
@@ -1137,7 +1264,7 @@ if (btnSendTicket) {
                 body: JSON.stringify(payload)
             });
             const result = await res.json();
-            if (result.status === 'ok') showToast('✅ تم إرسال رسالة التكت بنجاح إلى الديسكورد مع بنر التكت الجديد!');
+            if (result.status === 'ok') showToast('✅ تم إرسال رسالة التكت بنجاح إلى الديسكورد مع الأقسام المخصصة!');
             else showToast('❌ خطأ: ' + result.message);
         } catch (e) {
             showToast('❌ تعذر الإرسال: ' + e.message);
@@ -1227,7 +1354,8 @@ if (btnSaveSettings) {
             staff_role_id: staffRole,
             ticket_category_id: category,
             closed_category_id: closedCategory,
-            reviews_channel_id: reviewsChannel
+            reviews_channel_id: reviewsChannel,
+            departments: departmentsList
         };
         try {
             showToast('💾 جاري حفظ الإعدادات...');
@@ -1267,6 +1395,7 @@ function showToast(msg) {
 }
 
 document.addEventListener('DOMContentLoaded', () => {
+    renderDepartments();
     loadStatus();
     setInterval(loadStatus, 5000);
 });
@@ -1293,7 +1422,7 @@ def serve_static_img(filename):
 @app.route("/api/status")
 def api_status():
     cfg = load_config()
-    is_online = bot.is_ready()
+    is_online = (bot is not None) and bot.is_ready()
     guilds_data = []
     
     if is_online:
@@ -1329,14 +1458,15 @@ def api_config_save():
     cfg.update(data)
     save_config(cfg)
     
-    if new_token and (new_token != old_token or not bot.is_ready()):
+    is_ready = (bot is not None) and bot.is_ready()
+    if new_token and (new_token != old_token or not is_ready):
         start_bot_in_background(new_token)
         
     return jsonify({"status": "ok", "message": "تم حفظ الإعدادات بنجاح!"})
 
 @app.route("/api/ticket/send", methods=["POST"])
 def api_ticket_send():
-    if not bot.is_ready():
+    if bot is None or not bot.is_ready():
         return jsonify({"status": "error", "message": "البوت غير متصل بالديسكورد! يرجى التأكد من التوكن."}), 400
         
     data = request.json or {}
@@ -1352,6 +1482,12 @@ def api_ticket_send():
     desc = data.get("description", "")
     placeholder = data.get("placeholder", "اختر نوع الخدمة المطلوبة - 📁")
     color_hex = data.get("color", "#00ff41")
+    departments = data.get("departments", DEFAULT_DEPARTMENTS)
+
+    # Save departments to config
+    cfg = load_config()
+    cfg["departments"] = departments
+    save_config(cfg)
 
     async def send_panel():
         embed = discord.Embed(
@@ -1380,7 +1516,8 @@ def api_ticket_send():
             files.append(discord.File(banner_path, filename="ticket_banner.png"))
             embed.set_image(url="attachment://ticket_banner.png")
 
-        view = TicketPanelView(placeholder=placeholder)
+        view = TicketPanelView(placeholder=placeholder, departments=departments)
+        bot.add_view(view)
         if files:
             await channel.send(embed=embed, files=files, view=view)
         else:
@@ -1395,7 +1532,7 @@ def api_ticket_send():
 
 @app.route("/api/update/send", methods=["POST"])
 def api_update_send():
-    if not bot.is_ready():
+    if bot is None or not bot.is_ready():
         return jsonify({"status": "error", "message": "البوت غير متصل بالديسكورد!"}), 400
         
     data = request.json or {}
@@ -1447,7 +1584,7 @@ def api_update_send():
 
 @app.route("/api/rules/send", methods=["POST"])
 def api_rules_send():
-    if not bot.is_ready():
+    if bot is None or not bot.is_ready():
         return jsonify({"status": "error", "message": "البوت غير متصل بالديسكورد! يرجى التأكد من ربط التوكن."}), 400
         
     data = request.json or {}
@@ -1512,9 +1649,17 @@ def api_rules_send():
         return jsonify({"status": "error", "message": str(e)}), 500
 
 def bot_worker(token):
-    global bot_error_msg, bot_thread_active
+    global bot_error_msg, bot_thread_active, bot
     bot_thread_active = True
+    bot_error_msg = None
     try:
+        if bot is None or bot.is_closed():
+            intents = discord.Intents.default()
+            intents.guilds = True
+            intents.messages = True
+            intents.message_content = True
+            bot = commands.Bot(command_prefix="!", intents=intents)
+            setup_bot_handlers(bot)
         asyncio.run(bot.start(token))
     except Exception as e:
         bot_error_msg = str(e)
@@ -1524,7 +1669,7 @@ def bot_worker(token):
 
 def start_bot_in_background(token):
     global bot_thread_active
-    if token and not bot_thread_active and not bot.is_ready():
+    if token and not bot_thread_active:
         t = threading.Thread(target=bot_worker, args=(token,), daemon=True)
         t.start()
 
