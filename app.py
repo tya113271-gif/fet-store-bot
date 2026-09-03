@@ -239,7 +239,7 @@ class ClosedTicketActionView(discord.ui.View):
         reopen_embed = discord.Embed(
             title="🔓 تمت إعادة فتح التذكرة",
             description=f"قام {interaction.user.mention} بإعادة فتح التذكرة واستعادة صلاحية العميل.",
-            color=discord.Color.from_str("#00ff41")
+            color=discord.Color.from_str("#10d84a")
         )
         await channel.send(embed=reopen_embed, view=CloseTicketView())
 
@@ -311,7 +311,7 @@ class ReviewModal(discord.ui.Modal, title="⭐ تقييم تجربة العمي�
                 f"💬 **تقييم العميل :**\n{feedback_val}\n\n"
                 f"⭐ **التقييم من 10 :**\n**{rating_display}**"
             ),
-            color=discord.Color.from_str("#00ff41")
+            color=discord.Color.from_str("#10d84a")
         )
 
         files = []
@@ -399,10 +399,17 @@ class TicketDropdown(discord.ui.Select):
 
         active_cat = get_target_category(guild, "ticket_category_id", ["تكتات فعالة", "تذاكر فعالة", "active tickets", "tickets", "تذاكر"])
         
-        # Prepare channel name: e.g. 🟡・شراء-منتج-king
-        safe_prefix = prefix.strip().replace(" ", "-")
+        # Safe channel name to prevent Arabic/Number BiDi scrambles:
+        # Use middle dot '・' instead of hyphen '-' before username!
+        safe_prefix = prefix.strip()
         safe_user = re.sub(r'[^\w\u0600-\u06FF-]', '', user.name).lower()[:15]
-        channel_name = f"{safe_prefix}-{safe_user}"[:95]
+        
+        if "{user}" in safe_prefix:
+            channel_name = safe_prefix.replace("{user}", safe_user)[:95]
+        elif safe_prefix.endswith("・") or safe_prefix.endswith("-"):
+            channel_name = f"{safe_prefix}{safe_user}"[:95]
+        else:
+            channel_name = f"{safe_prefix}・{safe_user}"[:95]
 
         overwrites = {
             guild.default_role: discord.PermissionOverwrite(view_channel=False),
@@ -445,10 +452,23 @@ class TicketDropdown(discord.ui.Select):
                 await interaction.followup.send(f"❌ حدث خطأ أثناء إنشاء روم التذكرة: {e2}", ephemeral=True)
                 return
 
+        # Custom welcome message inside opened ticket
+        welcome_title_tpl = cfg.get("ticket_welcome_title") or "🎟️ تذكرة جديدة | {dept}"
+        welcome_desc_tpl = cfg.get("ticket_welcome_desc") or (
+            "مرحباً بك يا {user} في قسم **{dept}**!\n\n"
+            "• يرجى كتابة طلبك أو استفسارك بالتفصيل مع توفير معلومات الدفع إن وجدت.\n"
+            "• سيتواصل معك أحد مسؤولي المتجر في أقرب وقت.\n\n"
+            "اضغط على الزر أدناه لإغلاق التذكرة عند الانتهاء."
+        )
+
+        formatted_title = welcome_title_tpl.replace("{dept}", dept_name).replace("{user}", user.name)
+        formatted_desc = welcome_desc_tpl.replace("{user}", user.mention).replace("{dept}", dept_name)
+        embed_color = cfg.get("ticket_color") or "#10d84a"
+
         embed = discord.Embed(
-            title=f"🎟️ تذكرة جديدة | {dept_name}",
-            description=f"مرحباً بك يا {user.mention} في قسم **{dept_name}**!\n\n• يرجى كتابة طلبك أو استفسارك بالتفصيل مع توفير معلومات الدفع إن وجدت.\n• سيتواصل معك أحد مسؤولي المتجر في أقرب وقت.\n\nاضغط على الزر أدناه لإغلاق التذكرة عند الانتهاء.",
-            color=discord.Color.from_str("#00ff41")
+            title=formatted_title,
+            description=formatted_desc,
+            color=discord.Color.from_str(embed_color)
         )
         
         files = []
@@ -500,7 +520,7 @@ def setup_bot_handlers(b):
                         "عزيزنا العميل، رأيك يهمنا جداً لتطوير خدماتنا ومساعدتنا على تقديم الأفضل لك دائماً! 💚\n\n"
                         "يرجى التكرم بالضغط على الزر أدناه وإبداء رأيك وتقييمك لتعاملنا معك:"
                     ),
-                    color=discord.Color.from_str("#00ff41")
+                    color=discord.Color.from_str("#10d84a")
                 )
                 files = []
                 logo_path = os.path.join(ASSETS_DIR, "logo_circle.png")
@@ -555,16 +575,16 @@ HTML_TEMPLATE = """<!DOCTYPE html>
     <link href="https://fonts.googleapis.com/css2?family=Cairo:wght@400;600;700;800;900&family=Rajdhani:wght@600;700&display=swap" rel="stylesheet">
     <style>
 :root {
-    --bg-dark: #0a0d0a;
-    --bg-card: #121812;
-    --bg-input: #182218;
-    --neon-green: #00ff41;
-    --neon-glow: rgba(0, 255, 65, 0.35);
-    --border-color: rgba(0, 255, 65, 0.25);
-    --text-white: #ffffff;
-    --text-muted: #8fa08f;
+    --bg-dark: #060706;
+    --bg-card: #0d100d;
+    --bg-input: #121612;
+    --neon-green: #10d84a;
+    --neon-glow: rgba(16, 216, 74, 0.18);
+    --border-color: rgba(16, 216, 74, 0.22);
+    --text-white: #f5f8f5;
+    --text-muted: #859585;
     --danger: #ff4757;
-    --discord-bg: #313338;
+    --discord-bg: #1e1f22;
     --discord-card: #2b2d31;
     --discord-embed-bg: #2b2d31;
     --discord-text: #dbdee1;
@@ -573,40 +593,40 @@ HTML_TEMPLATE = """<!DOCTYPE html>
 }
 * { margin:0; padding:0; box-sizing:border-box; font-family:'Cairo','Rajdhani',sans-serif; }
 body { background-color:var(--bg-dark); color:var(--text-white); min-height:100vh; display:flex; flex-direction:column; }
-.dashboard-header { background:#0e140e; border-bottom:1.5px solid var(--border-color); padding:16px 32px; display:flex; justify-content:space-between; align-items:center; box-shadow:0 4px 20px rgba(0,0,0,0.5); }
+.dashboard-header { background:#090c09; border-bottom:1px solid var(--border-color); padding:16px 32px; display:flex; justify-content:space-between; align-items:center; box-shadow:0 4px 20px rgba(0,0,0,0.6); }
 .header-brand { display:flex; align-items:center; gap:16px; }
-.brand-logo { width:50px; height:50px; border-radius:50%; border:2px solid var(--neon-green); box-shadow:0 0 15px var(--neon-glow); }
+.brand-logo { width:48px; height:48px; border-radius:50%; border:2px solid var(--neon-green); box-shadow:0 0 12px var(--neon-glow); }
 .brand-text h1 { font-size:22px; font-weight:900; letter-spacing:2px; }
-.brand-text p { font-size:13px; color:var(--text-muted); }
-.accent { color:var(--neon-green); text-shadow:0 0 10px var(--neon-green); }
+.brand-text p { font-size:12px; color:var(--text-muted); }
+.accent { color:var(--neon-green); }
 .header-status { display:flex; align-items:center; gap:16px; }
-.status-indicator { display:flex; align-items:center; gap:8px; background:rgba(20,30,20,0.8); border:1px solid var(--border-color); padding:8px 16px; border-radius:20px; font-size:13px; font-weight:700; }
+.status-indicator { display:flex; align-items:center; gap:8px; background:rgba(13,16,13,0.9); border:1px solid var(--border-color); padding:7px 15px; border-radius:20px; font-size:13px; font-weight:700; }
 .status-dot { width:10px; height:10px; border-radius:50%; }
-.status-dot.online { background:var(--neon-green); box-shadow:0 0 10px var(--neon-green); }
-.status-dot.offline { background:var(--danger); box-shadow:0 0 10px var(--danger); }
+.status-dot.online { background:var(--neon-green); box-shadow:0 0 8px var(--neon-green); }
+.status-dot.offline { background:var(--danger); box-shadow:0 0 8px var(--danger); }
 .bot-info-card { display:flex; align-items:center; gap:10px; background:var(--bg-card); border:1px solid var(--border-color); padding:6px 14px; border-radius:20px; }
 .bot-avatar { width:28px; height:28px; border-radius:50%; }
 .bot-tag { font-size:13px; font-weight:700; color:var(--neon-green); }
 .dashboard-wrapper { display:flex; flex:1; overflow:hidden; }
-.dashboard-nav { width:260px; background:#0d120d; border-left:1px solid var(--border-color); padding:24px 16px; display:flex; flex-direction:column; gap:10px; }
-.nav-btn { display:flex; align-items:center; gap:12px; background:transparent; border:1px solid transparent; color:var(--text-muted); padding:12px 16px; border-radius:8px; font-size:14px; font-weight:700; cursor:pointer; text-align:right; transition:all 0.2s ease; }
-.nav-btn:hover { background:rgba(0,255,65,0.08); color:var(--text-white); border-color:var(--border-color); }
-.nav-btn.active { background:rgba(0,255,65,0.15); color:var(--neon-green); border-color:var(--neon-green); box-shadow:0 0 15px rgba(0,255,65,0.2); }
-.nav-icon { font-size:18px; }
-.dashboard-content { flex:1; padding:30px; overflow-y:auto; }
+.dashboard-nav { width:250px; background:#080a08; border-left:1px solid var(--border-color); padding:20px 14px; display:flex; flex-direction:column; gap:8px; }
+.nav-btn { display:flex; align-items:center; gap:12px; background:transparent; border:1px solid transparent; color:var(--text-muted); padding:11px 15px; border-radius:8px; font-size:14px; font-weight:700; cursor:pointer; text-align:right; transition:all 0.2s ease; }
+.nav-btn:hover { background:rgba(16,216,74,0.06); color:var(--text-white); border-color:var(--border-color); }
+.nav-btn.active { background:rgba(16,216,74,0.12); color:var(--neon-green); border-color:var(--neon-green); box-shadow:0 0 12px var(--neon-glow); }
+.nav-icon { font-size:17px; }
+.dashboard-content { flex:1; padding:28px; overflow-y:auto; }
 .tab-pane { display:none; }
 .tab-pane.active { display:block; }
 .pane-grid { display:grid; grid-template-columns:1fr 1.15fr; gap:24px; }
-.panel-card { background:var(--bg-card); border:1px solid var(--border-color); border-radius:12px; padding:24px; box-shadow:0 8px 30px rgba(0,0,0,0.3); }
-.card-title { font-size:16px; font-weight:800; margin-bottom:20px; color:var(--neon-green); border-bottom:1px solid var(--border-color); padding-bottom:10px; }
-.form-group { margin-bottom:16px; }
-.form-group label { display:block; font-size:13px; font-weight:700; margin-bottom:6px; color:#c0d0c0; }
-.form-input { width:100%; background:var(--bg-input); border:1px solid var(--border-color); border-radius:8px; padding:10px 14px; color:var(--text-white); font-size:13px; outline:none; transition:all 0.2s; }
-.form-input:focus { border-color:var(--neon-green); box-shadow:0 0 10px var(--neon-glow); }
-.color-picker { width:100%; height:40px; background:var(--bg-input); border:1px solid var(--border-color); border-radius:8px; cursor:pointer; padding:4px; }
-.btn-primary { width:100%; background:var(--neon-green); color:#000; border:none; border-radius:8px; padding:12px; font-size:14px; font-weight:900; cursor:pointer; transition:all 0.2s ease; margin-top:8px; box-shadow:0 0 15px var(--neon-glow); }
-.btn-primary:hover { background:#10db44; box-shadow:0 0 25px var(--neon-green); transform:translateY(-1px); }
-.btn-secondary { background:transparent; border:1px solid var(--border-color); color:var(--text-white); padding:8px 14px; border-radius:6px; font-size:12px; font-weight:700; cursor:pointer; }
+.panel-card { background:var(--bg-card); border:1px solid var(--border-color); border-radius:12px; padding:22px; box-shadow:0 8px 25px rgba(0,0,0,0.4); }
+.card-title { font-size:15px; font-weight:800; margin-bottom:18px; color:var(--neon-green); border-bottom:1px solid var(--border-color); padding-bottom:8px; }
+.form-group { margin-bottom:15px; }
+.form-group label { display:block; font-size:13px; font-weight:700; margin-bottom:6px; color:#b0c2b0; }
+.form-input { width:100%; background:var(--bg-input); border:1px solid var(--border-color); border-radius:8px; padding:9px 13px; color:var(--text-white); font-size:13px; outline:none; transition:all 0.2s; }
+.form-input:focus { border-color:var(--neon-green); box-shadow:0 0 8px var(--neon-glow); }
+.color-picker { width:100%; height:38px; background:var(--bg-input); border:1px solid var(--border-color); border-radius:8px; cursor:pointer; padding:3px; }
+.btn-primary { width:100%; background:var(--neon-green); color:#000; border:none; border-radius:8px; padding:12px; font-size:14px; font-weight:900; cursor:pointer; transition:all 0.2s ease; margin-top:8px; box-shadow:0 0 12px var(--neon-glow); }
+.btn-primary:hover { background:#14e350; box-shadow:0 0 18px var(--neon-green); transform:translateY(-1px); }
+.btn-secondary { background:transparent; border:1px solid var(--border-color); color:var(--text-white); padding:7px 13px; border-radius:6px; font-size:12px; font-weight:700; cursor:pointer; }
 .token-wrapper { display:flex; gap:8px; }
 .mt-2 { margin-top:8px; }
 .mt-3 { margin-top:16px; }
@@ -624,17 +644,17 @@ body { background-color:var(--bg-dark); color:var(--text-white); min-height:100v
 .author-icon { width:20px; height:20px; border-radius:50%; }
 .embed-body-flex { display:flex; justify-content:space-between; gap:12px; }
 .embed-text-col { flex:1; }
-.embed-title { font-size:16px; font-weight:700; color:var(--discord-white); margin-bottom:6px; }
+.embed-title { font-size:15px; font-weight:700; color:var(--discord-white); margin-bottom:6px; }
 .embed-desc { font-size:13px; color:var(--discord-text); line-height:1.5; white-space:pre-line; }
 .embed-thumbnail { width:65px; height:65px; border-radius:50%; object-fit:cover; flex-shrink:0; }
 .embed-banner-container { width:100%; border-radius:4px; overflow:hidden; }
 .embed-banner { width:100%; display:block; }
 .embed-footer { display:flex; align-items:center; gap:8px; font-size:11px; color:#949ba4; padding-top:4px; border-top:1px solid rgba(255,255,255,0.06); }
 .footer-icon { width:16px; height:16px; border-radius:50%; }
-.discord-select-menu { background:var(--discord-select-bg); border:1px solid rgba(255,255,255,0.1); border-radius:4px; padding:10px 14px; display:flex; justify-content:space-between; align-items:center; color:#949ba4; font-size:14px; font-weight:600; cursor:pointer; max-width:520px; }
+.discord-select-menu { background:var(--discord-select-bg); border:1px solid rgba(255,255,255,0.1); border-radius:4px; padding:10px 14px; display:flex; justify-content:space-between; align-items:center; color:#949ba4; font-size:13px; font-weight:600; cursor:pointer; max-width:520px; }
 .discord-mention-tag { font-size:14px; color:#e0e2e5; margin-bottom:4px; }
 .hidden { display:none !important; }
-.toast { position:fixed; bottom:30px; left:50%; transform:translateX(-50%); background:#0f1a0f; border:1.5px solid var(--neon-green); box-shadow:0 0 25px var(--neon-glow); padding:12px 28px; border-radius:25px; color:#ffffff; font-weight:700; z-index:1000; animation:toastUp 0.25s ease; }
+.toast { position:fixed; bottom:30px; left:50%; transform:translateX(-50%); background:#0d120d; border:1px solid var(--neon-green); box-shadow:0 0 20px var(--neon-glow); padding:11px 24px; border-radius:25px; color:#ffffff; font-weight:700; font-size:13px; z-index:1000; animation:toastUp 0.25s ease; }
 @keyframes toastUp { from { opacity:0; transform:translate(-50%,20px); } to { opacity:1; transform:translate(-50%,0); } }
     </style>
 </head>
@@ -684,7 +704,7 @@ body { background-color:var(--bg-dark); color:var(--text-white); min-height:100v
             <section class="tab-pane active" id="ticket-tab">
                 <div class="pane-grid">
                     <div class="panel-card form-card">
-                        <h2 class="card-title">⚙️ تخصيص رسالة التكت</h2>
+                        <h2 class="card-title">⚙️ تخصيص رسالة التكت العامة</h2>
                         <div class="form-group">
                             <label>📍 الروم المراد إرسال التكت فيها:</label>
                             <select id="ticket-channel-select" class="form-input">
@@ -692,12 +712,12 @@ body { background-color:var(--bg-dark); color:var(--text-white); min-height:100v
                             </select>
                         </div>
                         <div class="form-group">
-                            <label>📝 عنوان الرسالة (Embed Title):</label>
+                            <label>📝 عنوان الرسالة العامة (Embed Title):</label>
                             <input type="text" id="ticket-title-input" class="form-input" value="نظام التذاكر - FET STORE">
                         </div>
                         <div class="form-group">
-                            <label>📄 وصف التكت (Description):</label>
-                            <textarea id="ticket-desc-input" class="form-input" rows="5">عزيزي العضو / Dear Member
+                            <label>📄 وصف التكت العام (Description):</label>
+                            <textarea id="ticket-desc-input" class="form-input" rows="4">عزيزي العضو / Dear Member
 
 من خلال هذه القائمة يمكنك:
 • اختيار القسم المناسب لفتح تذكرة دعم فني
@@ -710,17 +730,37 @@ body { background-color:var(--bg-dark); color:var(--text-white); min-height:100v
                         </div>
                         <div class="form-group">
                             <label>🎨 لون الإطار (Hex Color):</label>
-                            <input type="color" id="ticket-color-input" class="color-picker" value="#00ff41">
+                            <input type="color" id="ticket-color-input" class="color-picker" value="#10d84a">
+                        </div>
+
+                        <!-- تخصيص الرسالة بعد فتح التكت -->
+                        <div class="form-group mt-3" style="border-top:1px solid var(--border-color); padding-top:14px;">
+                            <label style="color:var(--neon-green); font-size:14px; font-weight:800;">💬 الرسالة الترحيبية داخل التكت بعد الفتح:</label>
+                            <div class="form-group mt-2">
+                                <label>🏷️ عنوان رسالة الترحيب (Welcome Title):</label>
+                                <input type="text" id="ticket-welcome-title-input" class="form-input" value="🎟️ تذكرة جديدة | {dept}">
+                                <small class="form-hint">استخدم <code>{dept}</code> لاسم القسم، و <code>{user}</code> لاسم العميل.</small>
+                            </div>
+                            <div class="form-group">
+                                <label>📄 نص رسالة الترحيب (Welcome Description):</label>
+                                <textarea id="ticket-welcome-desc-input" class="form-input" rows="5">مرحباً بك يا {user} في قسم **{dept}**!
+
+• يرجى كتابة طلبك أو استفسارك بالتفصيل مع توفير معلومات الدفع إن وجدت.
+• سيتواصل معك أحد مسؤولي المتجر في أقرب وقت.
+
+اضغط على الزر أدناه لإغلاق التذكرة عند الانتهاء.</textarea>
+                                <small class="form-hint">استخدم <code>{user}</code> لمنشن العميل، و <code>{dept}</code> لاسم القسم المختار.</small>
+                            </div>
                         </div>
 
                         <!-- أقسام التذاكر وبداية اسم الروم -->
-                        <div class="form-group mt-3" style="border-top:1px solid var(--border-color); padding-top:16px;">
-                            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px;">
-                                <label style="margin:0; font-size:14px; color:var(--neon-green); font-weight:800;">🏷️ تخصيص أقسام التذاكر وبداية اسم الروم:</label>
-                                <button type="button" id="btn-add-dept" class="btn-secondary" style="background:rgba(0,255,65,0.15); color:var(--neon-green); border-color:var(--neon-green); padding:4px 12px; font-size:12px;">➕ إضافة قسم</button>
+                        <div class="form-group mt-3" style="border-top:1px solid var(--border-color); padding-top:14px;">
+                            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
+                                <label style="margin:0; font-size:14px; color:var(--neon-green); font-weight:800;">🏷️ أقسام التذاكر وبداية اسم الروم:</label>
+                                <button type="button" id="btn-add-dept" class="btn-secondary" style="background:rgba(16,216,74,0.12); color:var(--neon-green); border-color:var(--neon-green); padding:4px 12px; font-size:12px;">➕ إضافة قسم</button>
                             </div>
                             <small class="form-hint" style="margin-bottom:12px; display:block;">
-                                حدد اسم كل قسم، إيموجي القائمة، وبداية اسم الروم (مثل: <code>🟡・شراء-منتج</code>) ليفتح باسم <code>🟡・شراء-منتج-username</code> بدون وصف.
+                                حدد اسم كل قسم، إيموجي القائمة، وبداية اسم الروم (مثال: <code>🟡・شراء-منتج</code>). سيتم دمج اسم الروم بنقطة أنيقة <code>・</code> لمنع لخبطة الأرقام الإنجليزية مع العربي!
                             </small>
                             <div id="departments-container" style="display:flex; flex-direction:column; gap:8px;"></div>
                         </div>
@@ -741,7 +781,7 @@ body { background-color:var(--bg-dark); color:var(--text-white); min-height:100v
                                         <span class="bot-badge">APP</span>
                                         <span class="timestamp">Today at 11:45 PM</span>
                                     </div>
-                                    <div class="discord-embed" id="preview-embed" style="border-left-color: #00ff41;">
+                                    <div class="discord-embed" id="preview-embed" style="border-left-color: #10d84a;">
                                         <div class="embed-body-flex">
                                             <div class="embed-text-col">
                                                 <h3 class="embed-title" id="preview-title">نظام التذاكر - FET STORE</h3>
@@ -816,13 +856,13 @@ body { background-color:var(--bg-dark); color:var(--text-white); min-height:100v
                                         <span class="timestamp">Today at 11:50 PM</span>
                                     </div>
                                     <div class="discord-mention-tag">@everyone 📢 تحديث جديد في متجر <strong>FET STORE</strong></div>
-                                    <div class="discord-embed" style="border-left-color: #00ff41;">
+                                    <div class="discord-embed" style="border-left-color: #10d84a;">
                                         <div class="embed-body-flex">
                                             <div class="embed-text-col">
                                                 <h3 class="embed-title" id="preview-update-title">🚀 تم تحديث المنتج: FET INVENTORY V1.0</h3>
                                                 <div class="embed-desc" id="preview-update-desc">
                                                     • تم إضافة نظام الأسلحة التلقائي<br>
-                                                    • تحسين واجهة المستخدم باللون الأخضر النيون<br>
+                                                    • تحسين واجهة المستخدم باللون العشبي الأنيق<br>
                                                     • دعم كامل للسحب والإفلات
                                                 </div>
                                             </div>
@@ -873,7 +913,7 @@ body { background-color:var(--bg-dark); color:var(--text-white); min-height:100v
                         </div>
                         <div class="form-group">
                             <label>🎨 لون الإطار (Hex Color):</label>
-                            <input type="color" id="rules-color-input" class="color-picker" value="#00ff41">
+                            <input type="color" id="rules-color-input" class="color-picker" value="#10d84a">
                         </div>
                         <div class="form-group" style="display:flex; align-items:center; gap:8px;">
                             <input type="checkbox" id="rules-banner-checkbox" checked style="accent-color: var(--neon-green); width:18px; height:18px;">
@@ -895,7 +935,7 @@ body { background-color:var(--bg-dark); color:var(--text-white); min-height:100v
                                         <span class="bot-badge">APP</span>
                                         <span class="timestamp">Today at 10:00 PM</span>
                                     </div>
-                                    <div class="discord-embed" id="preview-rules-embed" style="border-left-color: #00ff41;">
+                                    <div class="discord-embed" id="preview-rules-embed" style="border-left-color: #10d84a;">
                                         <div class="embed-author">
                                             <img src="/static/img/logo_circle.png" class="author-icon" onerror="this.src='/static/img/logo.png'">
                                             <span>FET STORE | Official Guidelines</span>
@@ -987,6 +1027,7 @@ body { background-color:var(--bg-dark); color:var(--text-white); min-height:100v
     <script>
 let currentConfig = {};
 let botData = {};
+let departmentsLoaded = false;
 
 function safeElem(id) {
     return document.getElementById(id);
@@ -1021,6 +1062,11 @@ if(ticketTitleInput && previewTitle) ticketTitleInput.addEventListener('input', 
 if(ticketDescInput && previewDesc) ticketDescInput.addEventListener('input', (e) => { previewDesc.innerHTML = formatLines(e.target.value); });
 if(ticketPlaceholderInput && previewSelectPlaceholder) ticketPlaceholderInput.addEventListener('input', (e) => { previewSelectPlaceholder.innerText = e.target.value || 'اختر نوع الخدمة المطلوبة - 📁'; });
 if(ticketColorInput && previewEmbed) ticketColorInput.addEventListener('input', (e) => { previewEmbed.style.borderLeftColor = e.target.value; });
+
+const ticketWelcomeTitle = safeElem('ticket-welcome-title-input');
+const ticketWelcomeDesc = safeElem('ticket-welcome-desc-input');
+if(ticketWelcomeTitle) ticketWelcomeTitle.addEventListener('input', (e) => { e.target.dataset.userEdited = 'true'; });
+if(ticketWelcomeDesc) ticketWelcomeDesc.addEventListener('input', (e) => { e.target.dataset.userEdited = 'true'; });
 
 const updateProductInput = safeElem('update-product-input');
 const updateDescInput = safeElem('update-desc-input');
@@ -1078,7 +1124,7 @@ function renderDepartments() {
         const row = document.createElement('div');
         row.className = 'dept-row';
         row.dataset.index = index;
-        row.style.cssText = 'display:flex; gap:8px; align-items:center; background:var(--bg-input); padding:8px; border-radius:8px; border:1px solid rgba(0,255,65,0.2);';
+        row.style.cssText = 'display:flex; gap:8px; align-items:center; background:var(--bg-input); padding:8px; border-radius:8px; border:1px solid rgba(16,216,74,0.18);';
         
         row.innerHTML = `
             <input type="text" class="dept-emoji form-input" value="${dept.emoji || '🟡'}" style="width:48px; text-align:center; padding:6px; font-size:14px;" title="الإيموجي">
@@ -1129,10 +1175,8 @@ if (btnAddDept) {
 
 async function loadStatus() {
     try {
-        console.log('FET DASHBOARD: Fetching /api/status...');
         const res = await fetch('/api/status');
         const data = await res.json();
-        console.log('FET DASHBOARD: Status data received:', data);
         botData = data;
         currentConfig = data.config || {};
 
@@ -1171,11 +1215,21 @@ async function loadStatus() {
             safeElem('reviews-channel-id-manual').value = currentConfig.reviews_channel_id;
         }
 
-        if (currentConfig.departments && Array.isArray(currentConfig.departments) && currentConfig.departments.length > 0) {
-            departmentsList = currentConfig.departments;
+        // Only load welcome fields if not modified by user in session
+        if (currentConfig.ticket_welcome_title && ticketWelcomeTitle && !ticketWelcomeTitle.dataset.userEdited) {
+            ticketWelcomeTitle.value = currentConfig.ticket_welcome_title;
+        }
+        if (currentConfig.ticket_welcome_desc && ticketWelcomeDesc && !ticketWelcomeDesc.dataset.userEdited) {
+            ticketWelcomeDesc.value = currentConfig.ticket_welcome_desc;
+        }
+
+        // Only load departments ONCE on initial load to avoid wiping user edits every 5 seconds!
+        if (!departmentsLoaded) {
+            if (currentConfig.departments && Array.isArray(currentConfig.departments) && currentConfig.departments.length > 0) {
+                departmentsList = JSON.parse(JSON.stringify(currentConfig.departments));
+            }
             renderDepartments();
-        } else {
-            renderDepartments();
+            departmentsLoaded = true;
         }
     } catch (e) {
         console.error('Error fetching status:', e);
@@ -1247,13 +1301,14 @@ if (btnSendTicket) {
         const channelId = ticketChannelSelect ? ticketChannelSelect.value : '';
         if (!channelId) return showToast('⚠️ يرجى اختيار الروم أولاً!');
         
-        // Gather current departments list
         const payload = {
             channel_id: channelId,
             title: ticketTitleInput ? ticketTitleInput.value : 'نظام التذاكر - FET STORE',
             description: ticketDescInput ? ticketDescInput.value : '',
             placeholder: ticketPlaceholderInput ? ticketPlaceholderInput.value : 'اختر نوع الخدمة المطلوبة - 📁',
-            color: ticketColorInput ? ticketColorInput.value : '#00ff41',
+            color: ticketColorInput ? ticketColorInput.value : '#10d84a',
+            welcome_title: ticketWelcomeTitle ? ticketWelcomeTitle.value : '🎟️ تذكرة جديدة | {dept}',
+            welcome_desc: ticketWelcomeDesc ? ticketWelcomeDesc.value : '',
             departments: departmentsList
         };
         try {
@@ -1264,8 +1319,14 @@ if (btnSendTicket) {
                 body: JSON.stringify(payload)
             });
             const result = await res.json();
-            if (result.status === 'ok') showToast('✅ تم إرسال رسالة التكت بنجاح إلى الديسكورد مع الأقسام المخصصة!');
-            else showToast('❌ خطأ: ' + result.message);
+            if (result.status === 'ok') {
+                showToast('✅ تم إرسال رسالة التكت بنجاح إلى الديسكورد مع الأقسام ورسالة الترحيب!');
+                if (currentConfig) {
+                    currentConfig.departments = departmentsList;
+                    currentConfig.ticket_welcome_title = payload.welcome_title;
+                    currentConfig.ticket_welcome_desc = payload.welcome_desc;
+                }
+            } else showToast('❌ خطأ: ' + result.message);
         } catch (e) {
             showToast('❌ تعذر الإرسال: ' + e.message);
         }
@@ -1310,7 +1371,7 @@ if (btnSendRules) {
         const title = rulesTitleInput ? rulesTitleInput.value.trim() : '';
         const subtitle = rulesSubtitleInput ? rulesSubtitleInput.value.trim() : '';
         const rulesText = rulesTextInput ? rulesTextInput.value.trim() : '';
-        const color = rulesColorInput ? rulesColorInput.value : '#00ff41';
+        const color = rulesColorInput ? rulesColorInput.value : '#10d84a';
         const includeBanner = rulesBannerCheckbox ? rulesBannerCheckbox.checked : true;
         if (!channelId || !rulesText) return showToast('⚠️ يرجى اختيار الروم وكتابة بنود القوانين!');
         const payload = { channel_id: channelId, title: title, subtitle: subtitle, rules_text: rulesText, color: color, include_banner: includeBanner };
@@ -1355,6 +1416,8 @@ if (btnSaveSettings) {
             ticket_category_id: category,
             closed_category_id: closedCategory,
             reviews_channel_id: reviewsChannel,
+            ticket_welcome_title: ticketWelcomeTitle ? ticketWelcomeTitle.value : '🎟️ تذكرة جديدة | {dept}',
+            ticket_welcome_desc: ticketWelcomeDesc ? ticketWelcomeDesc.value : '',
             departments: departmentsList
         };
         try {
@@ -1395,7 +1458,6 @@ function showToast(msg) {
 }
 
 document.addEventListener('DOMContentLoaded', () => {
-    renderDepartments();
     loadStatus();
     setInterval(loadStatus, 5000);
 });
@@ -1481,12 +1543,17 @@ def api_ticket_send():
     title = data.get("title", "نظام التذاكر - FET STORE")
     desc = data.get("description", "")
     placeholder = data.get("placeholder", "اختر نوع الخدمة المطلوبة - 📁")
-    color_hex = data.get("color", "#00ff41")
+    color_hex = data.get("color", "#10d84a")
     departments = data.get("departments", DEFAULT_DEPARTMENTS)
+    welcome_title = data.get("welcome_title", "🎟️ تذكرة جديدة | {dept}")
+    welcome_desc = data.get("welcome_desc", "")
 
-    # Save departments to config
+    # Save to config
     cfg = load_config()
     cfg["departments"] = departments
+    cfg["ticket_welcome_title"] = welcome_title
+    cfg["ticket_welcome_desc"] = welcome_desc
+    cfg["ticket_color"] = color_hex
     save_config(cfg)
 
     async def send_panel():
@@ -1552,7 +1619,7 @@ def api_update_send():
         embed = discord.Embed(
             title=f"🚀 تم تحديث المنتج: {product_name}",
             description=content_text,
-            color=discord.Color.from_str("#00ff41")
+            color=discord.Color.from_str("#10d84a")
         )
         
         files = []
@@ -1599,7 +1666,7 @@ def api_rules_send():
     title = data.get("title", "FET STORE سياسة")
     subtitle = data.get("subtitle", "")
     rules_text = data.get("rules_text", "")
-    color_hex = data.get("color", "#00ff41")
+    color_hex = data.get("color", "#10d84a")
     include_banner = data.get("include_banner", True)
 
     async def send_rules():
