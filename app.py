@@ -1,11 +1,26 @@
 import os
 import re
+import io
 import sys
 import json
+import math
+import random
 import base64
 import asyncio
 import threading
 import logging
+from PIL import Image, ImageDraw, ImageFont, ImageFilter
+
+try:
+    import arabic_reshaper
+    from bidi.algorithm import get_display
+    def ar_txt(text):
+        if not text:
+            return ""
+        return get_display(arabic_reshaper.reshape(str(text)))
+except ImportError:
+    def ar_txt(text):
+        return str(text) if text else ""
 
 if hasattr(sys.stdout, 'reconfigure'):
     sys.stdout.reconfigure(encoding='utf-8')
@@ -47,6 +62,8 @@ DEFAULT_DEPARTMENTS = [
     {"id": "general_inquiry", "label": "الاستفسارات العامة", "emoji": "💬", "prefix": "💬・استفسار"}
 ]
 
+DEFAULT_REVIEWS_CHANNEL_ID = "1541905587150004344"
+
 def load_config():
     cfg = {}
     if os.path.exists(CONFIG_PATH):
@@ -63,12 +80,179 @@ def load_config():
     if "departments" not in cfg or not cfg["departments"]:
         cfg["departments"] = DEFAULT_DEPARTMENTS
         
+    cfg.setdefault("reviews_channel_id", DEFAULT_REVIEWS_CHANNEL_ID)
     return cfg
 
 def save_config(cfg):
     os.makedirs(os.path.dirname(CONFIG_PATH), exist_ok=True)
     with open(CONFIG_PATH, "w", encoding="utf-8") as f:
         json.dump(cfg, f, indent=4, ensure_ascii=False)
+
+# [[ Dynamic Review Card Generator ]] #
+def create_poly_bg(width, height, seed=42):
+    random.seed(seed)
+    base_color = (6, 8, 6)
+    highlight_color = (18, 28, 18)
+    img = Image.new("RGBA", (width, height), base_color)
+    draw = ImageDraw.Draw(img)
+    
+    cols = 16
+    rows = 7
+    dx = width / cols
+    dy = height / rows
+    
+    points = []
+    for r in range(rows + 1):
+        row_pts = []
+        for c in range(cols + 1):
+            if c == 0: x = 0
+            elif c == cols: x = width
+            else: x = c * dx + random.uniform(-dx * 0.4, dx * 0.4)
+            if r == 0: y = 0
+            elif r == rows: y = height
+            else: y = r * dy + random.uniform(-dy * 0.4, dy * 0.4)
+            row_pts.append((x, y))
+        points.append(row_pts)
+        
+    for r in range(rows):
+        for c in range(cols):
+            p1 = points[r][c]
+            p2 = points[r][c+1]
+            p3 = points[r+1][c]
+            p4 = points[r+1][c+1]
+            
+            cx = (p1[0] + p2[0] + p3[0]) / 3.0 / width
+            cy = (p1[1] + p2[1] + p3[1]) / 3.0 / height
+            dist = math.sqrt((cx - 0.5)**2 + (cy - 0.3)**2)
+            factor = max(0.0, min(1.0, 1.0 - dist * 1.0))
+            
+            r_col = int(base_color[0] * (1 - factor) + highlight_color[0] * factor + random.uniform(-2, 2))
+            g_col = int(base_color[1] * (1 - factor) + highlight_color[1] * factor + random.uniform(-3, 3)) + int(factor * 12)
+            b_col = int(base_color[2] * (1 - factor) + highlight_color[2] * factor + random.uniform(-2, 2))
+            col1 = (max(0, min(255, r_col)), max(0, min(255, g_col)), max(0, min(255, b_col)))
+            draw.polygon([p1, p2, p3], fill=col1, outline=(col1[0]+3, col1[1]+5, col1[2]+3))
+            
+            col2 = (max(0, min(255, r_col)), max(0, min(255, g_col-2)), max(0, min(255, b_col)))
+            draw.polygon([p2, p4, p3], fill=col2, outline=(col2[0]+3, col2[1]+5, col2[2]+3))
+            
+    return img.filter(ImageFilter.GaussianBlur(1.0))
+
+def draw_star(draw, cx, cy, r_outer, r_inner, fill_color=(255, 205, 30), outline_color=(220, 160, 10)):
+    points = []
+    for i in range(10):
+        angle = i * math.pi / 5 - math.pi / 2
+        r = r_outer if i % 2 == 0 else r_inner
+        points.append((cx + r * math.cos(angle), cy + r * math.sin(angle)))
+    draw.polygon(points, fill=fill_color, outline=outline_color)
+
+def generate_dynamic_review_card(avatar_bytes, user_name, feedback_text, rating_str="10", product_name=""):
+    w, h = 1000, 480
+    bg = create_poly_bg(w, h, seed=hash(user_name) % 10000)
+    
+    overlay = Image.new("RGBA", (w, h), (0, 0, 0, 0))
+    draw_ov = ImageDraw.Draw(overlay)
+    
+    margin = 30
+    draw_ov.rounded_rectangle((margin, margin, w - margin, h - margin), radius=22, fill=(11, 15, 11, 230), outline=(16, 216, 74, 90), width=2)
+    
+    bubble_x1 = 60
+    bubble_y1 = 125
+    bubble_x2 = w - 60
+    bubble_y2 = h - 90
+    draw_ov.rounded_rectangle((bubble_x1, bubble_y1, bubble_x2, bubble_y2), radius=16, fill=(16, 22, 16, 240), outline=(16, 216, 74, 50), width=1)
+    
+    font_bold = "C:\\Windows\\Fonts\\tradbdo.ttf"
+    if not os.path.exists(font_bold):
+        font_bold = "C:\\Windows\\Fonts\\arialbd.ttf"
+        
+    font_name = ImageFont.truetype(font_bold, 28)
+    font_title = ImageFont.truetype(font_bold, 34)
+    font_feedback = ImageFont.truetype(font_bold, 32)
+    font_prod = ImageFont.truetype(font_bold, 24)
+    
+    av_size = 72
+    av_x = w - margin - av_size - 30
+    av_y = margin + 22
+    
+    if avatar_bytes:
+        try:
+            av_img = Image.open(io.BytesIO(avatar_bytes)).convert("RGBA")
+            av_img = av_img.resize((av_size, av_size), Image.Resampling.LANCZOS)
+            
+            mask = Image.new("L", (av_size, av_size), 0)
+            d_mask = ImageDraw.Draw(mask)
+            d_mask.ellipse((0, 0, av_size, av_size), fill=255)
+            
+            draw_ov.ellipse((av_x - 3, av_y - 3, av_x + av_size + 3, av_y + av_size + 3), fill=(16, 216, 74, 180))
+            overlay.paste(av_img, (av_x, av_y), mask)
+        except Exception as e:
+            logger.warning(f"Avatar processing error: {e}")
+            
+    name_txt = ar_txt(f"العميل: {user_name}")
+    tb_name = draw_ov.textbbox((0, 0), name_txt, font=font_name)
+    name_w = tb_name[2] - tb_name[0]
+    draw_ov.text((av_x - name_w - 18, av_y + 18), name_txt, font=font_name, fill=(240, 250, 240, 255))
+    
+    header_txt = ar_txt("تقييم تجربة العميل")
+    draw_ov.text((margin + 35, margin + 35), header_txt, font=font_title, fill=(16, 216, 74, 255))
+    
+    reshaped_fb = ar_txt(feedback_text)
+    words = reshaped_fb.split(" ")
+    lines = []
+    cur_line = []
+    for word in words:
+        test_line = " ".join(cur_line + [word])
+        tb = draw_ov.textbbox((0, 0), test_line, font=font_feedback)
+        if (tb[2] - tb[0]) > (bubble_x2 - bubble_x1 - 60):
+            if cur_line:
+                lines.append(" ".join(cur_line))
+                cur_line = [word]
+            else:
+                lines.append(word)
+        else:
+            cur_line.append(word)
+    if cur_line:
+        lines.append(" ".join(cur_line))
+        
+    line_h = 42
+    total_text_h = len(lines) * line_h
+    start_y = bubble_y1 + (bubble_y2 - bubble_y1 - total_text_h) // 2
+    
+    for idx, l in enumerate(lines):
+        tb = draw_ov.textbbox((0, 0), l, font=font_feedback)
+        tw = tb[2] - tb[0]
+        tx = (w - tw) // 2
+        ty = start_y + idx * line_h
+        draw_ov.text((tx, ty), l, font=font_feedback, fill=(255, 255, 255, 255))
+        
+    star_y = h - margin - 28
+    num_stars = 5
+    try:
+        r_num = float(rating_str.replace("/10", "").strip())
+        if r_num <= 2: num_stars = 1
+        elif r_num <= 4: num_stars = 2
+        elif r_num <= 6: num_stars = 3
+        elif r_num <= 8: num_stars = 4
+        else: num_stars = 5
+    except:
+        num_stars = 5
+        
+    star_spacing = 42
+    start_star_x = (w - (5 * star_spacing)) // 2 + 21
+    for i in range(5):
+        sx = start_star_x + i * star_spacing
+        col = (255, 205, 30) if i < num_stars else (60, 75, 60)
+        out_col = (220, 160, 10) if i < num_stars else (40, 50, 40)
+        draw_star(draw_ov, sx, star_y, r_outer=16, r_inner=7, fill_color=col, outline_color=out_col)
+        
+    brand_txt = ar_txt("FET STORE")
+    draw_ov.text((margin + 35, h - margin - 38), brand_txt, font=font_prod, fill=(16, 216, 74, 180))
+    
+    final_card = Image.alpha_composite(bg, overlay)
+    buf = io.BytesIO()
+    final_card.save(buf, format="PNG")
+    buf.seek(0)
+    return buf
 
 # [[ Flask Web Dashboard ]] #
 app = Flask(__name__, static_folder="static", template_folder="templates")
@@ -109,6 +293,28 @@ def get_target_category(guild, cat_id_key, search_keywords):
         cat_lower = cat.name.lower()
         if any(kw.lower() in cat_lower for kw in search_keywords):
             return cat
+    return None
+
+async def get_reviews_channel(client, guild):
+    cfg = load_config()
+    rev_id = cfg.get("reviews_channel_id") or DEFAULT_REVIEWS_CHANNEL_ID
+    if rev_id:
+        try:
+            ch = client.get_channel(int(rev_id))
+            if ch: return ch
+            ch = await client.fetch_channel(int(rev_id))
+            if ch: return ch
+        except Exception as e:
+            logger.warning(f"Could not fetch review channel by ID {rev_id}: {e}")
+            
+    try:
+        channels = await guild.fetch_channels()
+        for ch in channels:
+            if isinstance(ch, discord.TextChannel) and ("تقييم" in ch.name or "تقيم" in ch.name):
+                return ch
+    except Exception as e:
+        logger.warning(f"Could not search guild channels: {e}")
+        
     return None
 
 class CloseTicketView(discord.ui.View):
@@ -203,7 +409,6 @@ class ClosedTicketActionView(discord.ui.View):
 
         await interaction.response.defer()
 
-        # إعادة صلاحية الرؤية لصاحب التذكرة
         owner_id = None
         if channel.topic:
             m = re.search(r'(?:FET_TICKET_OWNER:|ID:\s*)(\d+)', channel.topic)
@@ -260,7 +465,7 @@ class ClosedTicketActionView(discord.ui.View):
         except Exception as e:
             logger.error(f"Error deleting channel: {e}")
 
-# [[ Review / Feedback System With Product Name ]] #
+# [[ Review System With Dynamic Card & Avatar ]] #
 class AdminProductModal(discord.ui.Modal, title="📦 تحديد المنتج للتقييم"):
     product_input = discord.ui.TextInput(
         label="اسم المنتج أو الخدمة المقدمة للعميل",
@@ -351,37 +556,42 @@ class ReviewModal(discord.ui.Modal, title="⭐ تقييم تجربة العمي�
         feedback_val = self.feedback.value.strip()
         rating_val = self.rating.value.strip()
 
-        cfg = load_config()
-        reviews_channel_id = cfg.get("reviews_channel_id")
-        target_channel = None
-        if reviews_channel_id:
-            try:
-                target_channel = guild.get_channel(int(reviews_channel_id))
-            except:
-                pass
-
-        if not target_channel:
-            for ch in guild.text_channels:
-                ch_name_lower = ch.name.lower()
-                if any(kw in ch_name_lower for kw in ["تقييمك", "تقييم", "تقيم", "reviews", "feedback"]):
-                    target_channel = ch
-                    break
+        # إرسال التقييم لروم التقييمات الرسمية حصراً
+        dest = await get_reviews_channel(interaction.client, guild)
+        if not dest:
+            dest = interaction.channel
 
         rating_clean = rating_val.replace("/10", "").strip()
         rating_display = f"{rating_clean} / 10" if "/10" not in rating_val else rating_val
+
+        # توليد كارت التقييم بصورة الزبون وكلامه والنجوم تلقائياً
+        avatar_bytes = None
+        try:
+            avatar_bytes = await user.display_avatar.read()
+        except Exception as e:
+            logger.warning(f"Could not read user avatar: {e}")
+
+        card_buf = generate_dynamic_review_card(
+            avatar_bytes=avatar_bytes,
+            user_name=user.display_name or user.name,
+            feedback_text=feedback_val,
+            rating_str=rating_clean,
+            product_name=self.product_name
+        )
 
         embed = discord.Embed(
             title="⭐ تقييم عميل جديد | FET STORE",
             description=(
                 f"سعدنا بالعميل الجديد : {user.mention}\n\n"
-                f"📦 **المنتج / الخدمة :**\n**{self.product_name}**\n\n"
-                f"💬 **تقييم العميل :**\n{feedback_val}\n\n"
+                f"📦 **المنتج / الخدمة المقدمة :**\n**{self.product_name}**\n\n"
                 f"⭐ **التقييم من 10 :**\n**{rating_display}**"
             ),
             color=discord.Color.from_str("#10d84a")
         )
 
-        files = []
+        files = [discord.File(card_buf, filename="review_card.png")]
+        embed.set_image(url="attachment://review_card.png")
+
         logo_path = os.path.join(ASSETS_DIR, "logo_circle.png")
         if not os.path.exists(logo_path):
             logo_path = os.path.join(ASSETS_DIR, "logo.png")
@@ -392,23 +602,14 @@ class ReviewModal(discord.ui.Modal, title="⭐ تقييم تجربة العمي�
         else:
             embed.set_footer(text="FET STORE | شكراً لثقتكم بنا")
 
-        banner_path = os.path.join(ASSETS_DIR, "review_banner.png")
-        if os.path.exists(banner_path):
-            files.append(discord.File(banner_path, filename="review_banner.png"))
-            embed.set_image(url="attachment://review_banner.png")
-
-        dest = target_channel if target_channel else interaction.channel
         try:
-            if files:
-                await dest.send(content=f"📢 تقييم جديد من العميل : {user.mention}", embed=embed, files=files)
-            else:
-                await dest.send(content=f"📢 تقييم جديد من العميل : {user.mention}", embed=embed)
+            await dest.send(content=f"📢 تقييم جديد من العميل : {user.mention}", embed=embed, files=files)
         except Exception as e:
             logger.error(f"Error sending review to channel: {e}")
 
         await interaction.followup.send(f"✅ شكراً جزيلاً لك على تقييمك لمنتج **{self.product_name}**! نسعد ونتشرف دائماً بخدمتك 💚", ephemeral=True)
         try:
-            dest_mention = target_channel.mention if target_channel else ""
+            dest_mention = dest.mention if dest else ""
             await interaction.channel.send(f"💐 شكراً لك {user.mention} على تقييمك الجميل لمتجر **FET STORE**! {dest_mention}")
         except:
             pass
@@ -461,6 +662,7 @@ class TicketDropdown(discord.ui.Select):
         
         dept_name = dept_item["label"] if dept_item else selected_val
         prefix = dept_item.get("prefix", "🟡・تذكرة") if dept_item else "🟡・تذكرة"
+        dept_emoji = (dept_item.get("emoji") if dept_item else "🟡") or "🟡"
 
         # Check existing active ticket
         for ch in guild.text_channels:
@@ -472,16 +674,18 @@ class TicketDropdown(discord.ui.Select):
 
         active_cat = get_target_category(guild, "ticket_category_id", ["تكتات فعالة", "تذاكر فعالة", "active tickets", "tickets", "تذاكر"])
         
-        # Safe channel name to prevent Arabic/Number BiDi scrambles:
-        safe_prefix = prefix.strip()
+        # BiDi-Safe Channel Naming:
         safe_user = re.sub(r'[^\w\u0600-\u06FF-]', '', user.name).lower()[:15]
-        
-        if "{user}" in safe_prefix:
-            channel_name = safe_prefix.replace("{user}", safe_user)[:95]
-        elif safe_prefix.endswith("・") or safe_prefix.endswith("-"):
-            channel_name = f"{safe_prefix}{safe_user}"[:95]
+        clean_dept_label = re.sub(r'[^\w\u0600-\u06FF-]', '', dept_name).replace(" ", "-")[:20]
+
+        if "{user}" in prefix:
+            channel_name = prefix.replace("{user}", safe_user)[:95]
         else:
-            channel_name = f"{safe_prefix}・{safe_user}"[:95]
+            # إذا كان اليوزر يبدأ برقم (مثل 6y0j)، وضعه قبل الكلمات العربية يمنع خوارزمية BiDi من قلب الرقم!
+            if safe_user and safe_user[0].isdigit():
+                channel_name = f"{dept_emoji}・{safe_user}・{clean_dept_label}"[:95]
+            else:
+                channel_name = f"{dept_emoji}・{clean_dept_label}・{safe_user}"[:95]
 
         overwrites = {
             guild.default_role: discord.PermissionOverwrite(view_channel=False),
@@ -598,10 +802,8 @@ def setup_bot_handlers(b):
                     logger.warning(f"Could not delete trigger message: {e}")
 
                 if prod_from_msg:
-                    # Admin provided product name in message (e.g. تقيم كامري 2024)
                     await send_review_prompt_to_channel(message.channel, prod_from_msg)
                 else:
-                    # Admin typed just تقيم -> prompt admin with button to open product modal
                     admin_embed = discord.Embed(
                         title="📦 تحديد المنتج لتقييم العميل",
                         description=f"مرحباً {message.author.mention}، اضغط على الزر أدناه لكتابة اسم المنتج أو الخدمة المقدمة للعميل ليتم إرسال التقييم إليه فوراً:",
@@ -1281,7 +1483,6 @@ async function loadStatus() {
             safeElem('reviews-channel-id-manual').value = currentConfig.reviews_channel_id;
         }
 
-        // Only load welcome fields if not modified by user in session
         if (currentConfig.ticket_welcome_title && ticketWelcomeTitle && !ticketWelcomeTitle.dataset.userEdited) {
             ticketWelcomeTitle.value = currentConfig.ticket_welcome_title;
         }
@@ -1289,7 +1490,6 @@ async function loadStatus() {
             ticketWelcomeDesc.value = currentConfig.ticket_welcome_desc;
         }
 
-        // Only load departments ONCE on initial load to avoid wiping user edits every 5 seconds!
         if (!departmentsLoaded) {
             if (currentConfig.departments && Array.isArray(currentConfig.departments) && currentConfig.departments.length > 0) {
                 departmentsList = JSON.parse(JSON.stringify(currentConfig.departments));
@@ -1614,7 +1814,6 @@ def api_ticket_send():
     welcome_title = data.get("welcome_title", "🎟️ تذكرة جديدة | {dept}")
     welcome_desc = data.get("welcome_desc", "")
 
-    # Save to config
     cfg = load_config()
     cfg["departments"] = departments
     cfg["ticket_welcome_title"] = welcome_title
