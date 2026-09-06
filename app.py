@@ -7,8 +7,10 @@ import math
 import random
 import base64
 import asyncio
+import datetime
 import threading
 import logging
+from functools import wraps
 from PIL import Image, ImageDraw, ImageFont, ImageFilter
 
 try:
@@ -28,7 +30,7 @@ if hasattr(sys.stdout, 'reconfigure'):
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("FET_DASHBOARD")
 
-from flask import Flask, render_template_string, request, jsonify, send_file
+from flask import Flask, render_template_string, request, jsonify, send_file, session, redirect, url_for
 import discord
 from discord.ext import commands
 
@@ -62,6 +64,11 @@ DEFAULT_DEPARTMENTS = [
     {"id": "general_inquiry", "label": "الاستفسارات العامة", "emoji": "💬", "prefix": "💬・استفسار"}
 ]
 
+DEFAULT_ADMIN_USERS = [
+    {"username": "admin", "password": "fet2026", "role": "owner"},
+    {"username": "3ze", "password": "fet2026", "role": "owner"}
+]
+
 DEFAULT_REVIEWS_CHANNEL_ID = "1541905587150004344"
 
 def load_config():
@@ -79,6 +86,9 @@ def load_config():
         
     if "departments" not in cfg or not cfg["departments"]:
         cfg["departments"] = DEFAULT_DEPARTMENTS
+        
+    if "admin_users" not in cfg or not cfg["admin_users"]:
+        cfg["admin_users"] = DEFAULT_ADMIN_USERS
         
     cfg.setdefault("reviews_channel_id", DEFAULT_REVIEWS_CHANNEL_ID)
     return cfg
@@ -254,9 +264,20 @@ def generate_dynamic_review_card(avatar_bytes, user_name, feedback_text, rating_
     buf.seek(0)
     return buf
 
-# [[ Flask Web Dashboard ]] #
+# [[ Flask Web Dashboard & Auth Setup ]] #
 app = Flask(__name__, static_folder="static", template_folder="templates")
-app.config["SECRET_KEY"] = "fet_store_secret_2026"
+app.secret_key = os.environ.get("SECRET_KEY", "fet_store_secret_2026_super_secure_auth_luxury")
+app.permanent_session_lifetime = datetime.timedelta(days=30)
+
+def login_required(f):
+    @wraps(f)
+    def decorated_function(*args, **kwargs):
+        if not session.get("logged_in"):
+            if request.path.startswith("/api/"):
+                return jsonify({"status": "error", "message": "غير مصرح - يرجى تسجيل الدخول أولاً"}), 401
+            return redirect(url_for("login_page"))
+        return f(*args, **kwargs)
+    return decorated_function
 
 # [[ Discord Bot Setup & Handlers ]] #
 bot = None
@@ -328,7 +349,6 @@ class CloseTicketView(discord.ui.View):
         cfg = load_config()
         staff_role_id = cfg.get("staff_role_id", "")
         
-        # منع الزبون نهائياً: فقط طاقم الإدارة يمكنهم إغلاق التذكرة
         is_staff = is_user_staff(interaction.user, guild, staff_role_id)
         if not is_staff:
             await interaction.response.send_message("❌ عذراً، إغلاق التذكرة متاح فقط لطاقم الإدارة والدعم الفني.", ephemeral=True)
@@ -345,7 +365,6 @@ class CloseTicketView(discord.ui.View):
                 except:
                     pass
                 
-        # 1. سحب صلاحية الرؤية بالكامل من العميل ومن أي عضو غير إداري
         if owner_id:
             owner_member = guild.get_member(owner_id)
             if not owner_member:
@@ -366,7 +385,6 @@ class CloseTicketView(discord.ui.View):
                 except Exception as e:
                     logger.warning(f"Could not set permission for member {target}: {e}")
 
-        # 2. نقل التذكرة إلى قسم التكتات المغلقة وتغيير اسمها
         target_closed_category = get_target_category(guild, "closed_category_id", ["تكتات مغلقة", "تذاكر مغلقة", "closed tickets", "closed", "مغلق"])
         
         clean_name = channel.name.replace("closed-", "")
@@ -556,7 +574,6 @@ class ReviewModal(discord.ui.Modal, title="⭐ تقييم تجربة العمي�
         feedback_val = self.feedback.value.strip()
         rating_val = self.rating.value.strip()
 
-        # إرسال التقييم لروم التقييمات الرسمية حصراً
         dest = await get_reviews_channel(interaction.client, guild)
         if not dest:
             dest = interaction.channel
@@ -564,7 +581,6 @@ class ReviewModal(discord.ui.Modal, title="⭐ تقييم تجربة العمي�
         rating_clean = rating_val.replace("/10", "").strip()
         rating_display = f"{rating_clean} / 10" if "/10" not in rating_val else rating_val
 
-        # توليد كارت التقييم بصورة الزبون وكلامه والنجوم تلقائياً
         avatar_bytes = None
         try:
             avatar_bytes = await user.display_avatar.read()
@@ -664,7 +680,6 @@ class TicketDropdown(discord.ui.Select):
         prefix = dept_item.get("prefix", "🟡・تذكرة") if dept_item else "🟡・تذكرة"
         dept_emoji = (dept_item.get("emoji") if dept_item else "🟡") or "🟡"
 
-        # Check existing active ticket
         for ch in guild.text_channels:
             if ch.topic and f"FET_TICKET_OWNER:{user.id}" in ch.topic and not ch.name.startswith("closed"):
                 await interaction.response.send_message(f"⚠️ لديك تذكرة مفتوحة بالفعل: {ch.mention}", ephemeral=True)
@@ -674,14 +689,12 @@ class TicketDropdown(discord.ui.Select):
 
         active_cat = get_target_category(guild, "ticket_category_id", ["تكتات فعالة", "تذاكر فعالة", "active tickets", "tickets", "تذاكر"])
         
-        # BiDi-Safe Channel Naming:
         safe_user = re.sub(r'[^\w\u0600-\u06FF-]', '', user.name).lower()[:15]
         clean_dept_label = re.sub(r'[^\w\u0600-\u06FF-]', '', dept_name).replace(" ", "-")[:20]
 
         if "{user}" in prefix:
             channel_name = prefix.replace("{user}", safe_user)[:95]
         else:
-            # إذا كان اليوزر يبدأ برقم (مثل 6y0j)، وضعه قبل الكلمات العربية يمنع خوارزمية BiDi من قلب الرقم!
             if safe_user and safe_user[0].isdigit():
                 channel_name = f"{dept_emoji}・{safe_user}・{clean_dept_label}"[:95]
             else:
@@ -728,7 +741,6 @@ class TicketDropdown(discord.ui.Select):
                 await interaction.followup.send(f"❌ حدث خطأ أثناء إنشاء روم التذكرة: {e2}", ephemeral=True)
                 return
 
-        # Custom welcome message inside opened ticket (no English words)
         welcome_title_tpl = cfg.get("ticket_welcome_title") or "🎟️ تذكرة جديدة | {dept}"
         welcome_desc_tpl = cfg.get("ticket_welcome_desc") or (
             "مرحباً بك يا {user} في قسم **{dept}**!\n\n"
@@ -825,7 +837,6 @@ def setup_bot_handlers(b):
         b.add_view(ReviewPromptView())
         await b.change_presence(activity=discord.Game(name="FET STORE | خدمة العملاء"))
 
-# Initialize default bot
 intents = discord.Intents.default()
 intents.guilds = True
 intents.messages = True
@@ -834,6 +845,253 @@ bot = commands.Bot(command_prefix="!", intents=intents)
 setup_bot_handlers(bot)
 
 # [[ Built-in HTML / UI Templates ]] #
+LOGIN_HTML_TEMPLATE = """<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>تسجيل الدخول | FET STORE Dashboard</title>
+    <link href="https://fonts.googleapis.com/css2?family=Cairo:wght@400;600;700;800;900&family=Rajdhani:wght@600;700&display=swap" rel="stylesheet">
+    <style>
+:root {
+    --bg-dark: #060706;
+    --bg-card: #0d100d;
+    --bg-input: #121612;
+    --neon-green: #10d84a;
+    --neon-glow: rgba(16, 216, 74, 0.22);
+    --border-color: rgba(16, 216, 74, 0.25);
+    --text-white: #f5f8f5;
+    --text-muted: #859585;
+    --danger: #ff4757;
+}
+* { margin:0; padding:0; box-sizing:border-box; font-family:'Cairo','Rajdhani',sans-serif; }
+body {
+    background-color: var(--bg-dark);
+    color: var(--text-white);
+    min-height: 100vh;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    padding: 20px;
+    background-image: 
+        radial-gradient(circle at 50% 20%, rgba(16, 216, 74, 0.08) 0%, transparent 50%),
+        linear-gradient(180deg, #050705 0%, #080b08 100%);
+}
+.login-container {
+    width: 100%;
+    max-width: 440px;
+}
+.login-card {
+    background: var(--bg-card);
+    border: 1px solid var(--border-color);
+    border-radius: 18px;
+    padding: 36px 32px;
+    box-shadow: 0 12px 40px rgba(0, 0, 0, 0.7), 0 0 30px var(--neon-glow);
+    text-align: center;
+}
+.brand-logo {
+    width: 72px;
+    height: 72px;
+    border-radius: 50%;
+    border: 2px solid var(--neon-green);
+    box-shadow: 0 0 16px var(--neon-glow);
+    margin-bottom: 16px;
+}
+.login-card h1 {
+    font-size: 24px;
+    font-weight: 900;
+    letter-spacing: 2px;
+    margin-bottom: 4px;
+}
+.accent { color: var(--neon-green); }
+.subtitle {
+    font-size: 13px;
+    color: var(--text-muted);
+    margin-bottom: 26px;
+}
+.form-group {
+    margin-bottom: 18px;
+    text-align: right;
+}
+.form-group label {
+    display: block;
+    font-size: 13px;
+    font-weight: 700;
+    margin-bottom: 8px;
+    color: #b0c2b0;
+}
+.input-wrapper {
+    position: relative;
+    display: flex;
+    align-items: center;
+}
+.input-icon {
+    position: absolute;
+    right: 14px;
+    color: var(--text-muted);
+    font-size: 16px;
+}
+.form-input {
+    width: 100%;
+    background: var(--bg-input);
+    border: 1px solid var(--border-color);
+    border-radius: 10px;
+    padding: 12px 42px 12px 14px;
+    color: var(--text-white);
+    font-size: 14px;
+    outline: none;
+    transition: all 0.2s;
+}
+.form-input:focus {
+    border-color: var(--neon-green);
+    box-shadow: 0 0 10px var(--neon-glow);
+}
+.toggle-pwd {
+    position: absolute;
+    left: 14px;
+    cursor: pointer;
+    color: var(--text-muted);
+    font-size: 14px;
+    user-select: none;
+}
+.remember-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin: 18px 0 24px 0;
+    font-size: 13px;
+}
+.remember-label {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    cursor: pointer;
+    user-select: none;
+    color: #c5d5c5;
+}
+.remember-checkbox {
+    width: 18px;
+    height: 18px;
+    accent-color: var(--neon-green);
+    cursor: pointer;
+}
+.remember-badge {
+    font-size: 11px;
+    color: var(--neon-green);
+    background: rgba(16, 216, 74, 0.1);
+    padding: 2px 8px;
+    border-radius: 12px;
+    border: 1px solid rgba(16, 216, 74, 0.2);
+}
+.btn-submit {
+    width: 100%;
+    background: var(--neon-green);
+    color: #000;
+    border: none;
+    border-radius: 10px;
+    padding: 14px;
+    font-size: 15px;
+    font-weight: 900;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    box-shadow: 0 0 15px var(--neon-glow);
+}
+.btn-submit:hover {
+    background: #14e350;
+    box-shadow: 0 0 25px var(--neon-green);
+    transform: translateY(-2px);
+}
+.error-box {
+    background: rgba(255, 71, 87, 0.15);
+    border: 1px solid var(--danger);
+    color: #ff6b81;
+    padding: 10px 14px;
+    border-radius: 8px;
+    font-size: 13px;
+    font-weight: 700;
+    margin-bottom: 18px;
+    animation: shake 0.3s ease;
+}
+@keyframes shake {
+    0%, 100% { transform: translateX(0); }
+    25% { transform: translateX(-6px); }
+    75% { transform: translateX(6px); }
+}
+.login-footer {
+    margin-top: 24px;
+    font-size: 11px;
+    color: var(--text-muted);
+}
+    </style>
+</head>
+<body>
+    <div class="login-container">
+        <div class="login-card">
+            <img src="/static/img/logo_circle.png" alt="FET STORE Logo" class="brand-logo" onerror="this.src='/static/img/logo.png'">
+            <h1>FET <span class="accent">STORE</span></h1>
+            <p class="subtitle">لوحة التحكم الإدارية المشفرة والمحمية 🔒</p>
+
+            {% if error %}
+            <div class="error-box">
+                {{ error }}
+            </div>
+            {% endif %}
+
+            <form method="POST" action="/login">
+                <div class="form-group">
+                    <label>اسم المستخدم (Username):</label>
+                    <div class="input-wrapper">
+                        <span class="input-icon">👤</span>
+                        <input type="text" name="username" class="form-input" placeholder="ادخل اسم المستخدم..." value="{{ default_username or '' }}" required autofocus>
+                    </div>
+                </div>
+
+                <div class="form-group">
+                    <label>كلمة المرور (Password):</label>
+                    <div class="input-wrapper">
+                        <span class="input-icon">🔑</span>
+                        <input type="password" id="password-input" name="password" class="form-input" placeholder="ادخل كلمة المرور..." required>
+                        <span class="toggle-pwd" id="toggle-pwd-btn">👁️</span>
+                    </div>
+                </div>
+
+                <div class="remember-row">
+                    <label class="remember-label">
+                        <input type="checkbox" name="remember" class="remember-checkbox" checked>
+                        <span>تذكرني على هذا الجهاز</span>
+                    </label>
+                    <span class="remember-badge">حفظ الدخول 30 يوماً</span>
+                </div>
+
+                <button type="submit" class="btn-submit">
+                    🚀 تسجيل الدخول للوحة التحكم
+                </button>
+            </form>
+
+            <div class="login-footer">
+                نظام الحماية والأمان المشفر © FET STORE 2026
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const toggleBtn = document.getElementById('toggle-pwd-btn');
+        const pwdInput = document.getElementById('password-input');
+        if (toggleBtn && pwdInput) {
+            toggleBtn.addEventListener('click', () => {
+                if (pwdInput.type === 'password') {
+                    pwdInput.type = 'text';
+                    toggleBtn.innerText = '🔒';
+                } else {
+                    pwdInput.type = 'password';
+                    toggleBtn.innerText = '👁️';
+                }
+            });
+        }
+    </script>
+</body>
+</html>"""
+
 HTML_TEMPLATE = """<!DOCTYPE html>
 <html lang="ar" dir="rtl">
 <head>
@@ -867,7 +1125,7 @@ body { background-color:var(--bg-dark); color:var(--text-white); min-height:100v
 .brand-text h1 { font-size:22px; font-weight:900; letter-spacing:2px; }
 .brand-text p { font-size:12px; color:var(--text-muted); }
 .accent { color:var(--neon-green); }
-.header-status { display:flex; align-items:center; gap:16px; }
+.header-status { display:flex; align-items:center; gap:14px; }
 .status-indicator { display:flex; align-items:center; gap:8px; background:rgba(13,16,13,0.9); border:1px solid var(--border-color); padding:7px 15px; border-radius:20px; font-size:13px; font-weight:700; }
 .status-dot { width:10px; height:10px; border-radius:50%; }
 .status-dot.online { background:var(--neon-green); box-shadow:0 0 8px var(--neon-green); }
@@ -875,6 +1133,9 @@ body { background-color:var(--bg-dark); color:var(--text-white); min-height:100v
 .bot-info-card { display:flex; align-items:center; gap:10px; background:var(--bg-card); border:1px solid var(--border-color); padding:6px 14px; border-radius:20px; }
 .bot-avatar { width:28px; height:28px; border-radius:50%; }
 .bot-tag { font-size:13px; font-weight:700; color:var(--neon-green); }
+.user-badge { display:flex; align-items:center; gap:8px; background:rgba(16,216,74,0.08); border:1px solid var(--border-color); padding:6px 12px; border-radius:20px; font-size:12px; font-weight:700; }
+.btn-logout { background:rgba(255,71,87,0.15); border:1px solid var(--danger); color:#ff6b81; padding:4px 10px; border-radius:12px; font-size:11px; font-weight:800; text-decoration:none; transition:0.2s; }
+.btn-logout:hover { background:var(--danger); color:#fff; }
 .dashboard-wrapper { display:flex; flex:1; overflow:hidden; }
 .dashboard-nav { width:250px; background:#080a08; border-left:1px solid var(--border-color); padding:20px 14px; display:flex; flex-direction:column; gap:8px; }
 .nav-btn { display:flex; align-items:center; gap:12px; background:transparent; border:1px solid transparent; color:var(--text-muted); padding:11px 15px; border-radius:8px; font-size:14px; font-weight:700; cursor:pointer; text-align:right; transition:all 0.2s ease; }
@@ -944,6 +1205,10 @@ body { background-color:var(--bg-dark); color:var(--text-white); min-height:100v
                 <img src="/static/img/logo_circle.png" id="bot-avatar" class="bot-avatar" onerror="this.src='/static/img/logo.png'">
                 <span class="bot-tag" id="bot-username">FET Store Bot</span>
             </div>
+            <div class="user-badge">
+                <span>👤 {{ session.get('username', 'المشرف') }}</span>
+                <a href="/logout" class="btn-logout" title="تسجيل الخروج">🚪 خروج</a>
+            </div>
         </div>
     </header>
 
@@ -960,6 +1225,10 @@ body { background-color:var(--bg-dark); color:var(--text-white); min-height:100v
             <button class="nav-btn" data-tab="rules-tab">
                 <span class="nav-icon">📜</span>
                 <span class="nav-title">نشر القوانين (Rules)</span>
+            </button>
+            <button class="nav-btn" data-tab="admins-tab">
+                <span class="nav-icon">👥</span>
+                <span class="nav-title">المشرفين والأمان</span>
             </button>
             <button class="nav-btn" data-tab="settings-tab">
                 <span class="nav-icon">⚙️</span>
@@ -1001,7 +1270,6 @@ body { background-color:var(--bg-dark); color:var(--text-white); min-height:100v
                             <input type="color" id="ticket-color-input" class="color-picker" value="#10d84a">
                         </div>
 
-                        <!-- تخصيص الرسالة بعد فتح التكت -->
                         <div class="form-group mt-3" style="border-top:1px solid var(--border-color); padding-top:14px;">
                             <label style="color:var(--neon-green); font-size:14px; font-weight:800;">💬 الرسالة الترحيبية داخل التكت بعد الفتح:</label>
                             <div class="form-group mt-2">
@@ -1021,7 +1289,6 @@ body { background-color:var(--bg-dark); color:var(--text-white); min-height:100v
                             </div>
                         </div>
 
-                        <!-- أقسام التذاكر وبداية اسم الروم -->
                         <div class="form-group mt-3" style="border-top:1px solid var(--border-color); padding-top:14px;">
                             <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
                                 <label style="margin:0; font-size:14px; color:var(--neon-green); font-weight:800;">🏷️ أقسام التذاكر وبداية اسم الروم:</label>
@@ -1240,7 +1507,48 @@ body { background-color:var(--bg-dark); color:var(--text-white); min-height:100v
                 </div>
             </section>
 
-            <!-- Tab 4: Settings -->
+            <!-- Tab 4: Admins & Security -->
+            <section class="tab-pane" id="admins-tab">
+                <div class="pane-grid">
+                    <div class="panel-card form-card">
+                        <h2 class="card-title">👥 إضافة مشرف مصرح له</h2>
+                        <div class="form-group">
+                            <label>👤 اسم المستخدم للمشرف (Username):</label>
+                            <input type="text" id="new-admin-user" class="form-input" placeholder="مثال: fahad أو saood">
+                        </div>
+                        <div class="form-group">
+                            <label>🔑 كلمة المرور للمشرف (Password):</label>
+                            <input type="text" id="new-admin-pwd" class="form-input" placeholder="اكتب كلمة مرور قوية له...">
+                        </div>
+                        <button id="btn-add-admin" class="btn-primary">
+                            <span>➕ إضافة المشرف ومنحه الصلاحية</span>
+                        </button>
+
+                        <div class="form-group mt-3" style="border-top:1px solid var(--border-color); padding-top:16px;">
+                            <label style="color:var(--neon-green); font-size:14px; font-weight:800;">🔑 تغيير كلمة المرور لحسابك الحالي:</label>
+                            <div class="form-group mt-2">
+                                <label>كلمة المرور الجديدة:</label>
+                                <input type="password" id="change-pwd-input" class="form-input" placeholder="ادخل كلمة المرور الجديدة...">
+                            </div>
+                            <button id="btn-change-pwd" class="btn-secondary" style="width:100%; padding:10px; font-size:13px; font-weight:800; border-color:var(--neon-green); color:var(--neon-green);">
+                                💾 حفظ وتحديث كلمة المرور
+                            </button>
+                        </div>
+                    </div>
+
+                    <div class="panel-card preview-card">
+                        <h2 class="card-title">🛡️ قائمة المشرفين المصرح لهم بالدخول</h2>
+                        <p style="font-size:12px; color:var(--text-muted); margin-bottom:14px;">
+                            فقط الأشخاص الموجودين في هذه القائمة يمكنهم الدخول للوحة التحكم وتعديل الإعدادات أو إرسال التكتات.
+                        </p>
+                        <div id="admins-list-container" style="display:flex; flex-direction:column; gap:10px;">
+                            <!-- Dynamic Admins List -->
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Tab 5: Settings -->
             <section class="tab-pane" id="settings-tab">
                 <div class="panel-card" style="max-width: 650px; margin: 0 auto;">
                     <h2 class="card-title">⚙️ إعدادات ربط البوت</h2>
@@ -1314,6 +1622,7 @@ document.querySelectorAll('.nav-btn').forEach(btn => {
         const tabId = btn.dataset.tab;
         const target = safeElem(tabId);
         if (target) target.classList.add('active');
+        if (tabId === 'admins-tab') loadAdmins();
     });
 });
 
@@ -1444,6 +1753,10 @@ if (btnAddDept) {
 async function loadStatus() {
     try {
         const res = await fetch('/api/status');
+        if (res.status === 401) {
+            window.location.href = '/login';
+            return;
+        }
         const data = await res.json();
         botData = data;
         currentConfig = data.config || {};
@@ -1558,6 +1871,117 @@ function populateDropdowns(guilds) {
             }
         }
     }
+}
+
+// [[ Admin Management JS ]] //
+async function loadAdmins() {
+    const container = safeElem('admins-list-container');
+    if (!container) return;
+    try {
+        const res = await fetch('/api/admins');
+        const data = await res.json();
+        if (data.status === 'ok') {
+            container.innerHTML = '';
+            data.admins.forEach(adm => {
+                const card = document.createElement('div');
+                card.style.cssText = 'display:flex; justify-content:space-between; align-items:center; background:var(--bg-input); padding:10px 14px; border-radius:8px; border:1px solid rgba(16,216,74,0.15);';
+                
+                const isOwner = adm.role === 'owner';
+                const isMe = adm.username === data.current_user;
+                const badge = isOwner ? '<span style="background:rgba(255,205,30,0.15); color:#ffcd1e; border:1px solid rgba(255,205,30,0.3); font-size:11px; padding:2px 8px; border-radius:10px; font-weight:800;">👑 مالك المتجر</span>' : '<span style="background:rgba(16,216,74,0.15); color:var(--neon-green); border:1px solid rgba(16,216,74,0.3); font-size:11px; padding:2px 8px; border-radius:10px; font-weight:800;">🛡️ مشرف</span>';
+
+                let delBtn = '';
+                if (!isOwner && !isMe) {
+                    delBtn = `<button type="button" class="btn-secondary" onclick="deleteAdmin('${adm.username}')" style="color:var(--danger); border-color:var(--danger); padding:4px 10px; font-size:11px; cursor:pointer;">🗑️ سحب الصلاحية</button>`;
+                } else if (isMe) {
+                    delBtn = `<span style="font-size:11px; color:var(--text-muted); font-weight:700;">(حسابك الحالي)</span>`;
+                }
+
+                card.innerHTML = `
+                    <div style="display:flex; align-items:center; gap:10px;">
+                        <span style="font-size:16px;">👤</span>
+                        <strong style="font-size:14px; color:var(--text-white);">${adm.username}</strong>
+                        ${badge}
+                    </div>
+                    <div>${delBtn}</div>
+                `;
+                container.appendChild(card);
+            });
+        }
+    } catch (e) {
+        console.error('Error loading admins:', e);
+    }
+}
+
+async function deleteAdmin(username) {
+    if (!confirm(`هل أنت متأكد من سحب صلاحية المشرف (${username})؟ لن يتمكن من دخول الداشبورد بعد الآن.`)) return;
+    try {
+        showToast('⏳ جاري سحب الصلاحية...');
+        const res = await fetch('/api/admins/delete', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ username: username })
+        });
+        const r = await res.json();
+        if (r.status === 'ok') {
+            showToast('✅ ' + r.message);
+            loadAdmins();
+        } else showToast('❌ خطأ: ' + r.message);
+    } catch (e) {
+        showToast('❌ تعذر الحذف: ' + e.message);
+    }
+}
+
+const btnAddAdmin = safeElem('btn-add-admin');
+if (btnAddAdmin) {
+    btnAddAdmin.addEventListener('click', async () => {
+        const uInp = safeElem('new-admin-user');
+        const pInp = safeElem('new-admin-pwd');
+        const username = uInp ? uInp.value.trim() : '';
+        const password = pInp ? pInp.value.trim() : '';
+        if (!username || !password) return showToast('⚠️ يرجى كتابة اسم المستخدم وكلمة المرور للمشرف!');
+        try {
+            showToast('⏳ جاري إضافة المشرف...');
+            const res = await fetch('/api/admins/add', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ username: username, password: password })
+            });
+            const r = await res.json();
+            if (r.status === 'ok') {
+                showToast('✅ ' + r.message);
+                if (uInp) uInp.value = '';
+                if (pInp) pInp.value = '';
+                loadAdmins();
+            }} else showToast('❌ خطأ: ' + r.message);
+        } catch (e) {
+            showToast('❌ خطأ في الإضافة: ' + e.message);
+        }
+    });
+}
+
+const btnChangePwd = safeElem('btn-change-pwd');
+if (btnChangePwd) {
+    btnChangePwd.addEventListener('click', async () => {
+        const pInp = safeElem('change-pwd-input');
+        const newPwd = pInp ? pInp.value.trim() : '';
+        if (!newPwd) return showToast('⚠️ يرجى كتابة كلمة المرور الجديدة!');
+        try {
+            showToast('⏳ جاري تحديث كلمة المرور...');
+            const res = await fetch('/api/admins/change_password', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ new_password: newPwd })
+            });
+            const r = await res.json();
+            if (r.status === 'ok') {
+                showToast('✅ ' + r.message);
+                if (pInp) pInp.value = '';
+            } else showToast('❌ خطأ: ' + r.message);
+        } catch (e) {
+            showToast('❌ خطأ: ' + e.message);
+        }
+    });
 }
 
 const btnSendTicket = safeElem('btn-send-ticket');
@@ -1735,8 +2159,38 @@ if (document.readyState === 'complete' || document.readyState === 'interactive')
 </html>
 """
 
-# [[ Web Dashboard Routes ]] #
+# [[ Web Dashboard Routes & Auth ]] #
+@app.route("/login", methods=["GET", "POST"])
+def login_page():
+    if request.method == "GET":
+        if session.get("logged_in"):
+            return redirect(url_for("index"))
+        return render_template_string(LOGIN_HTML_TEMPLATE, error=None)
+
+    username = request.form.get("username", "").strip()
+    password = request.form.get("password", "").strip()
+    remember = request.form.get("remember") == "on"
+
+    cfg = load_config()
+    admins = cfg.get("admin_users", DEFAULT_ADMIN_USERS)
+    user = next((u for u in admins if u.get("username", "").lower() == username.lower() and u.get("password") == password), None)
+
+    if user:
+        session["logged_in"] = True
+        session["username"] = user["username"]
+        session["role"] = user.get("role", "staff")
+        session.permanent = remember
+        return redirect(url_for("index"))
+    else:
+        return render_template_string(LOGIN_HTML_TEMPLATE, error="❌ اسم المستخدم أو كلمة المرور غير صحيحة!", default_username=username)
+
+@app.route("/logout")
+def logout():
+    session.clear()
+    return redirect(url_for("login_page"))
+
 @app.route("/")
+@login_required
 def index():
     return render_template_string(HTML_TEMPLATE)
 
@@ -1748,6 +2202,7 @@ def serve_static_img(filename):
     return "", 404
 
 @app.route("/api/status")
+@login_required
 def api_status():
     cfg = load_config()
     is_online = (bot is not None) and bot.is_ready()
@@ -1776,7 +2231,96 @@ def api_status():
         "guilds": guilds_data
     })
 
+@app.route("/api/admins", methods=["GET"])
+@login_required
+def api_admins_list():
+    cfg = load_config()
+    admins = cfg.get("admin_users", DEFAULT_ADMIN_USERS)
+    safe_list = [{"username": u["username"], "role": u.get("role", "staff")} for u in admins]
+    return jsonify({
+        "status": "ok",
+        "admins": safe_list,
+        "current_user": session.get("username")
+    })
+
+@app.route("/api/admins/add", methods=["POST"])
+@login_required
+def api_admins_add():
+    data = request.json or {}
+    username = data.get("username", "").strip()
+    password = data.get("password", "").strip()
+
+    if not username or not password:
+        return jsonify({"status": "error", "message": "يرجى كتابة اسم المستخدم وكلمة المرور."}), 400
+
+    cfg = load_config()
+    admins = cfg.get("admin_users", DEFAULT_ADMIN_USERS)
+    
+    if any(u.get("username", "").lower() == username.lower() for u in admins):
+        return jsonify({"status": "error", "message": "اسم المستخدم هذا موجود بالفعل!"}), 400
+
+    admins.append({"username": username, "password": password, "role": "staff"})
+    cfg["admin_users"] = admins
+    save_config(cfg)
+
+    return jsonify({"status": "ok", "message": f"تمت إضافة المشرف ({username}) بنجاح!"})
+
+@app.route("/api/admins/delete", methods=["POST"])
+@login_required
+def api_admins_delete():
+    data = request.json or {}
+    username = data.get("username", "").strip()
+
+    if not username:
+        return jsonify({"status": "error", "message": "اسم المستخدم غير محدد."}), 400
+
+    if username.lower() == session.get("username", "").lower():
+        return jsonify({"status": "error", "message": "لا يمكنك حذف حسابك الحالي!"}), 400
+
+    cfg = load_config()
+    admins = cfg.get("admin_users", DEFAULT_ADMIN_USERS)
+    
+    target = next((u for u in admins if u.get("username", "").lower() == username.lower()), None)
+    if not target:
+        return jsonify({"status": "error", "message": "المشرف غير موجود!"}), 404
+
+    if target.get("role") == "owner":
+        return jsonify({"status": "error", "message": "لا يمكن سحب صلاحية مالك المتجر الأساسي!"}), 400
+
+    cfg["admin_users"] = [u for u in admins if u.get("username", "").lower() != username.lower()]
+    save_config(cfg)
+
+    return jsonify({"status": "ok", "message": f"تم سحب صلاحية المشرف ({username}) بنجاح!"})
+
+@app.route("/api/admins/change_password", methods=["POST"])
+@login_required
+def api_admins_change_password():
+    data = request.json or {}
+    new_password = data.get("new_password", "").strip()
+
+    if not new_password or len(new_password) < 4:
+        return jsonify({"status": "error", "message": "كلمة المرور يجب أن تكون 4 أحرف على الأقل."}), 400
+
+    current_user = session.get("username")
+    cfg = load_config()
+    admins = cfg.get("admin_users", DEFAULT_ADMIN_USERS)
+    
+    updated = False
+    for u in admins:
+        if u.get("username", "").lower() == current_user.lower():
+            u["password"] = new_password
+            updated = True
+            break
+
+    if updated:
+        cfg["admin_users"] = admins
+        save_config(cfg)
+        return jsonify({"status": "ok", "message": "تم تحديث كلمة المرور لحسابك بنجاح!"})
+    else:
+        return jsonify({"status": "error", "message": "تعذر العثور على الحساب الحالي!"}), 404
+
 @app.route("/api/config/save", methods=["POST"])
+@login_required
 def api_config_save():
     data = request.json or {}
     cfg = load_config()
@@ -1793,6 +2337,7 @@ def api_config_save():
     return jsonify({"status": "ok", "message": "تم حفظ الإعدادات بنجاح!"})
 
 @app.route("/api/ticket/send", methods=["POST"])
+@login_required
 def api_ticket_send():
     if bot is None or not bot.is_ready():
         return jsonify({"status": "error", "message": "البوت غير متصل بالديسكورد! يرجى التأكد من التوكن."}), 400
@@ -1863,6 +2408,7 @@ def api_ticket_send():
         return jsonify({"status": "error", "message": str(e)}), 500
 
 @app.route("/api/update/send", methods=["POST"])
+@login_required
 def api_update_send():
     if bot is None or not bot.is_ready():
         return jsonify({"status": "error", "message": "البوت غير متصل بالديسكورد!"}), 400
@@ -1915,6 +2461,7 @@ def api_update_send():
         return jsonify({"status": "error", "message": str(e)}), 500
 
 @app.route("/api/rules/send", methods=["POST"])
+@login_required
 def api_rules_send():
     if bot is None or not bot.is_ready():
         return jsonify({"status": "error", "message": "البوت غير متصل بالديسكورد! يرجى التأكد من ربط التوكن."}), 400
@@ -2005,7 +2552,6 @@ def start_bot_in_background(token):
         t = threading.Thread(target=bot_worker, args=(token,), daemon=True)
         t.start()
 
-# Auto-start bot on module load
 _init_cfg = load_config()
 _init_token = _init_cfg.get("token", "").strip()
 if _init_token:
