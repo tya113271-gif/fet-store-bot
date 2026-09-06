@@ -11,7 +11,16 @@ import datetime
 import threading
 import logging
 from functools import wraps
-from PIL import Image, ImageDraw, ImageFont, ImageFilter
+
+try:
+    from PIL import Image, ImageDraw, ImageFont, ImageFilter
+except ImportError:
+    try:
+        import subprocess
+        subprocess.run([sys.executable, "-m", "pip", "install", "Pillow", "arabic-reshaper", "python-bidi"], capture_output=True, timeout=60)
+        from PIL import Image, ImageDraw, ImageFont, ImageFilter
+    except Exception as _e:
+        Image = ImageDraw = ImageFont = ImageFilter = None
 
 try:
     import arabic_reshaper
@@ -155,114 +164,150 @@ def draw_star(draw, cx, cy, r_outer, r_inner, fill_color=(255, 205, 30), outline
         points.append((cx + r * math.cos(angle), cy + r * math.sin(angle)))
     draw.polygon(points, fill=fill_color, outline=outline_color)
 
-def generate_dynamic_review_card(avatar_bytes, user_name, feedback_text, rating_str="10", product_name=""):
-    w, h = 1000, 480
-    bg = create_poly_bg(w, h, seed=hash(user_name) % 10000)
-    
-    overlay = Image.new("RGBA", (w, h), (0, 0, 0, 0))
-    draw_ov = ImageDraw.Draw(overlay)
-    
-    margin = 30
-    draw_ov.rounded_rectangle((margin, margin, w - margin, h - margin), radius=22, fill=(11, 15, 11, 230), outline=(16, 216, 74, 90), width=2)
-    
-    bubble_x1 = 60
-    bubble_y1 = 125
-    bubble_x2 = w - 60
-    bubble_y2 = h - 90
-    draw_ov.rounded_rectangle((bubble_x1, bubble_y1, bubble_x2, bubble_y2), radius=16, fill=(16, 22, 16, 240), outline=(16, 216, 74, 50), width=1)
-    
-    font_bold = "C:\\Windows\\Fonts\\tradbdo.ttf"
-    if not os.path.exists(font_bold):
-        font_bold = "C:\\Windows\\Fonts\\arialbd.ttf"
-        
-    font_name = ImageFont.truetype(font_bold, 28)
-    font_title = ImageFont.truetype(font_bold, 34)
-    font_feedback = ImageFont.truetype(font_bold, 32)
-    font_prod = ImageFont.truetype(font_bold, 24)
-    
-    av_size = 72
-    av_x = w - margin - av_size - 30
-    av_y = margin + 22
-    
-    if avatar_bytes:
+def get_card_font(size):
+    candidates = [
+        "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
+        "/usr/share/fonts/truetype/liberation/LiberationSans-Bold.ttf",
+        "/usr/share/fonts/truetype/freefont/FreeSansBold.ttf",
+        "C:\\Windows\\Fonts\\tradbdo.ttf",
+        "C:\\Windows\\Fonts\\arialbd.ttf",
+        "arial.ttf",
+        "DejaVuSans.ttf"
+    ]
+    if ImageFont is not None:
+        for c in candidates:
+            if os.path.exists(c):
+                try:
+                    return ImageFont.truetype(c, size)
+                except:
+                    pass
         try:
-            av_img = Image.open(io.BytesIO(avatar_bytes)).convert("RGBA")
-            av_img = av_img.resize((av_size, av_size), Image.Resampling.LANCZOS)
-            
-            mask = Image.new("L", (av_size, av_size), 0)
-            d_mask = ImageDraw.Draw(mask)
-            d_mask.ellipse((0, 0, av_size, av_size), fill=255)
-            
-            draw_ov.ellipse((av_x - 3, av_y - 3, av_x + av_size + 3, av_y + av_size + 3), fill=(16, 216, 74, 180))
-            overlay.paste(av_img, (av_x, av_y), mask)
-        except Exception as e:
-            logger.warning(f"Avatar processing error: {e}")
-            
-    name_txt = ar_txt(f"العميل: {user_name}")
-    tb_name = draw_ov.textbbox((0, 0), name_txt, font=font_name)
-    name_w = tb_name[2] - tb_name[0]
-    draw_ov.text((av_x - name_w - 18, av_y + 18), name_txt, font=font_name, fill=(240, 250, 240, 255))
-    
-    header_txt = ar_txt("تقييم تجربة العميل")
-    draw_ov.text((margin + 35, margin + 35), header_txt, font=font_title, fill=(16, 216, 74, 255))
-    
-    reshaped_fb = ar_txt(feedback_text)
-    words = reshaped_fb.split(" ")
-    lines = []
-    cur_line = []
-    for word in words:
-        test_line = " ".join(cur_line + [word])
-        tb = draw_ov.textbbox((0, 0), test_line, font=font_feedback)
-        if (tb[2] - tb[0]) > (bubble_x2 - bubble_x1 - 60):
-            if cur_line:
-                lines.append(" ".join(cur_line))
-                cur_line = [word]
-            else:
-                lines.append(word)
-        else:
-            cur_line.append(word)
-    if cur_line:
-        lines.append(" ".join(cur_line))
-        
-    line_h = 42
-    total_text_h = len(lines) * line_h
-    start_y = bubble_y1 + (bubble_y2 - bubble_y1 - total_text_h) // 2
-    
-    for idx, l in enumerate(lines):
-        tb = draw_ov.textbbox((0, 0), l, font=font_feedback)
-        tw = tb[2] - tb[0]
-        tx = (w - tw) // 2
-        ty = start_y + idx * line_h
-        draw_ov.text((tx, ty), l, font=font_feedback, fill=(255, 255, 255, 255))
-        
-    star_y = h - margin - 28
-    num_stars = 5
+            return ImageFont.load_default(size=size)
+        except:
+            try:
+                return ImageFont.load_default()
+            except:
+                pass
+    return None
+
+def generate_dynamic_review_card(avatar_bytes, user_name, feedback_text, rating_str="10", product_name=""):
+    if Image is None or ImageDraw is None:
+        static_banner_path = os.path.join(ASSETS_DIR, "review_banner.png")
+        if os.path.exists(static_banner_path):
+            with open(static_banner_path, "rb") as f:
+                return io.BytesIO(f.read())
+        return None
     try:
-        r_num = float(rating_str.replace("/10", "").strip())
-        if r_num <= 2: num_stars = 1
-        elif r_num <= 4: num_stars = 2
-        elif r_num <= 6: num_stars = 3
-        elif r_num <= 8: num_stars = 4
-        else: num_stars = 5
-    except:
+        w, h = 1000, 480
+        bg = create_poly_bg(w, h, seed=hash(user_name) % 10000)
+        
+        overlay = Image.new("RGBA", (w, h), (0, 0, 0, 0))
+        draw_ov = ImageDraw.Draw(overlay)
+        
+        margin = 30
+        draw_ov.rounded_rectangle((margin, margin, w - margin, h - margin), radius=22, fill=(11, 15, 11, 230), outline=(16, 216, 74, 90), width=2)
+        
+        bubble_x1 = 60
+        bubble_y1 = 125
+        bubble_x2 = w - 60
+        bubble_y2 = h - 90
+        draw_ov.rounded_rectangle((bubble_x1, bubble_y1, bubble_x2, bubble_y2), radius=16, fill=(16, 22, 16, 240), outline=(16, 216, 74, 50), width=1)
+        
+        font_name = get_card_font(28)
+        font_title = get_card_font(34)
+        font_feedback = get_card_font(32)
+        font_prod = get_card_font(24)
+        
+        av_size = 72
+        av_x = w - margin - av_size - 30
+        av_y = margin + 22
+        
+        if avatar_bytes:
+            try:
+                av_img = Image.open(io.BytesIO(avatar_bytes)).convert("RGBA")
+                av_img = av_img.resize((av_size, av_size), Image.Resampling.LANCZOS)
+                
+                mask = Image.new("L", (av_size, av_size), 0)
+                d_mask = ImageDraw.Draw(mask)
+                d_mask.ellipse((0, 0, av_size, av_size), fill=255)
+                
+                draw_ov.ellipse((av_x - 3, av_y - 3, av_x + av_size + 3, av_y + av_size + 3), fill=(16, 216, 74, 180))
+                overlay.paste(av_img, (av_x, av_y), mask)
+            except Exception as e:
+                logger.warning(f"Avatar processing error: {e}")
+                
+        name_txt = ar_txt(f"العميل: {user_name}")
+        tb_name = draw_ov.textbbox((0, 0), name_txt, font=font_name)
+        name_w = tb_name[2] - tb_name[0]
+        draw_ov.text((av_x - name_w - 18, av_y + 18), name_txt, font=font_name, fill=(240, 250, 240, 255))
+        
+        header_txt = ar_txt("تقييم تجربة العميل")
+        draw_ov.text((margin + 35, margin + 35), header_txt, font=font_title, fill=(16, 216, 74, 255))
+        
+        reshaped_fb = ar_txt(feedback_text)
+        words = reshaped_fb.split(" ")
+        lines = []
+        cur_line = []
+        for word in words:
+            test_line = " ".join(cur_line + [word])
+            tb = draw_ov.textbbox((0, 0), test_line, font=font_feedback)
+            if (tb[2] - tb[0]) > (bubble_x2 - bubble_x1 - 60):
+                if cur_line:
+                    lines.append(" ".join(cur_line))
+                    cur_line = [word]
+                else:
+                    lines.append(word)
+            else:
+                cur_line.append(word)
+        if cur_line:
+            lines.append(" ".join(cur_line))
+            
+        line_h = 42
+        total_text_h = len(lines) * line_h
+        start_y = bubble_y1 + (bubble_y2 - bubble_y1 - total_text_h) // 2
+        
+        for idx, l in enumerate(lines):
+            tb = draw_ov.textbbox((0, 0), l, font=font_feedback)
+            tw = tb[2] - tb[0]
+            tx = (w - tw) // 2
+            ty = start_y + idx * line_h
+            draw_ov.text((tx, ty), l, font=font_feedback, fill=(255, 255, 255, 255))
+            
+        star_y = h - margin - 28
         num_stars = 5
+        try:
+            r_num = float(rating_str.replace("/10", "").strip())
+            if r_num <= 2: num_stars = 1
+            elif r_num <= 4: num_stars = 2
+            elif r_num <= 6: num_stars = 3
+            elif r_num <= 8: num_stars = 4
+            else: num_stars = 5
+        except:
+            num_stars = 5
+            
+        star_spacing = 42
+        start_star_x = (w - (5 * star_spacing)) // 2 + 21
+        for i in range(5):
+            sx = start_star_x + i * star_spacing
+            col = (255, 205, 30) if i < num_stars else (60, 75, 60)
+            out_col = (220, 160, 10) if i < num_stars else (40, 50, 40)
+            draw_star(draw_ov, sx, star_y, r_outer=16, r_inner=7, fill_color=col, outline_color=out_col)
+            
+        brand_txt = ar_txt("FET STORE")
+        draw_ov.text((margin + 35, h - margin - 38), brand_txt, font=font_prod, fill=(16, 216, 74, 180))
         
-    star_spacing = 42
-    start_star_x = (w - (5 * star_spacing)) // 2 + 21
-    for i in range(5):
-        sx = start_star_x + i * star_spacing
-        col = (255, 205, 30) if i < num_stars else (60, 75, 60)
-        out_col = (220, 160, 10) if i < num_stars else (40, 50, 40)
-        draw_star(draw_ov, sx, star_y, r_outer=16, r_inner=7, fill_color=col, outline_color=out_col)
-        
-    brand_txt = ar_txt("FET STORE")
-    draw_ov.text((margin + 35, h - margin - 38), brand_txt, font=font_prod, fill=(16, 216, 74, 180))
-    
-    final_card = Image.alpha_composite(bg, overlay)
-    buf = io.BytesIO()
-    final_card.save(buf, format="PNG")
-    buf.seek(0)
-    return buf
+        final_card = Image.alpha_composite(bg, overlay)
+        buf = io.BytesIO()
+        final_card.save(buf, format="PNG")
+        buf.seek(0)
+        return buf
+    except Exception as e:
+        logger.error(f"Dynamic review card generation error: {e}")
+        static_banner_path = os.path.join(ASSETS_DIR, "review_banner.png")
+        if os.path.exists(static_banner_path):
+            with open(static_banner_path, "rb") as f:
+                return io.BytesIO(f.read())
+        return None
 
 # [[ Flask Web Dashboard & Auth Setup ]] #
 app = Flask(__name__, static_folder="static", template_folder="templates")
@@ -605,8 +650,15 @@ class ReviewModal(discord.ui.Modal, title="⭐ تقييم تجربة العمي�
             color=discord.Color.from_str("#10d84a")
         )
 
-        files = [discord.File(card_buf, filename="review_card.png")]
-        embed.set_image(url="attachment://review_card.png")
+        files = []
+        if card_buf:
+            files.append(discord.File(card_buf, filename="review_card.png"))
+            embed.set_image(url="attachment://review_card.png")
+        else:
+            banner_path = os.path.join(ASSETS_DIR, "review_banner.png")
+            if os.path.exists(banner_path):
+                files.append(discord.File(banner_path, filename="review_card.png"))
+                embed.set_image(url="attachment://review_card.png")
 
         logo_path = os.path.join(ASSETS_DIR, "logo_circle.png")
         if not os.path.exists(logo_path):
