@@ -1864,6 +1864,10 @@ async function loadStatus() {
         }
     } catch (e) {
         console.error('Error fetching status:', e);
+        const botStatusText = safeElem('bot-status-text');
+        if (botStatusText) botStatusText.innerText = 'تعذر فحص الاتصال ⚠️';
+        const botStatusDot = safeElem('bot-status-dot') || document.querySelector('.status-dot');
+        if (botStatusDot) botStatusDot.className = 'status-dot offline';
     }
 }
 
@@ -2005,7 +2009,9 @@ if (btnAddAdmin) {
                 if (uInp) uInp.value = '';
                 if (pInp) pInp.value = '';
                 loadAdmins();
-            }} else showToast('❌ خطأ: ' + r.message);
+            } else {
+                showToast('❌ خطأ: ' + r.message);
+            }
         } catch (e) {
             showToast('❌ خطأ في الإضافة: ' + e.message);
         }
