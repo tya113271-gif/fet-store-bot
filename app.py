@@ -837,12 +837,63 @@ class TicketPanelView(discord.ui.View):
         self.add_item(TicketDropdown(placeholder=placeholder, departments=departments))
 
 def setup_bot_handlers(b):
+    invites_cache = {}
+
     @b.event
     async def on_message(message: discord.Message):
         if message.author.bot or not message.guild:
             return
 
         content_clean = message.content.strip()
+
+        # Check invite stats command
+        for inv_cmd in ["!دعواتي", "دعواتي", "!invites", "invites"]:
+            if content_clean.lower() == inv_cmd:
+                cfg = load_config()
+                target_count = int(cfg.get("invite_target_count", 2) or 2)
+                reward_role_id = cfg.get("invite_reward_role_id")
+                invites_data = cfg.get("user_invites", {})
+                cur_count = invites_data.get(str(message.author.id), 0)
+                
+                role_str = ""
+                if reward_role_id:
+                    try:
+                        r = message.guild.get_role(int(reward_role_id))
+                        if r:
+                            role_str = r.mention
+                    except:
+                        pass
+
+                rem = max(0, target_count - cur_count)
+                if rem == 0:
+                    status_line = f"🎉 **مكتمل!** حصلت على رتبة {role_str or 'المكافأة'}!"
+                else:
+                    status_line = f"⏳ باقي لك **{rem}** دعوة للحصول على رتبة {role_str or 'المكافأة'}!"
+
+                embed = discord.Embed(
+                    title="📊 إحصائيات الدعوات | FET STORE",
+                    description=(
+                        f"مرحباً {message.author.mention} 👋\n\n"
+                        f"📨 **عدد دعواتك المحتسبة:** `{cur_count}` من أصل `{target_count}`\n\n"
+                        f"{status_line}"
+                    ),
+                    color=discord.Color.from_str("#10d84a")
+                )
+                logo_path = os.path.join(ASSETS_DIR, "logo_circle.png")
+                files = []
+                if os.path.exists(logo_path):
+                    files.append(discord.File(logo_path, filename="logo_circle.png"))
+                    embed.set_thumbnail(url="attachment://logo_circle.png")
+                    embed.set_footer(text="FET STORE | نظام المكافآت", icon_url="attachment://logo_circle.png")
+                else:
+                    embed.set_footer(text="FET STORE | نظام المكافآت")
+
+                if files:
+                    await message.channel.send(embed=embed, files=files)
+                else:
+                    await message.channel.send(embed=embed)
+                return
+
         is_review_cmd = False
         prod_from_msg = ""
         
@@ -889,10 +940,125 @@ def setup_bot_handlers(b):
         b.add_view(ReviewPromptView())
         await b.change_presence(activity=discord.Game(name="FET STORE | خدمة العملاء"))
 
+        # Cache guild invites for tracking
+        for guild in b.guilds:
+            try:
+                invs = await guild.invites()
+                invites_cache[guild.id] = {inv.code: inv.uses for inv in invs}
+                logger.info(f"Cached {len(invs)} invites for guild {guild.name}")
+            except Exception as e:
+                logger.warning(f"Could not fetch invites for {guild.name}: {e}")
+
+    @b.event
+    async def on_invite_create(invite):
+        try:
+            if invite.guild.id not in invites_cache:
+                invites_cache[invite.guild.id] = {}
+            invites_cache[invite.guild.id][invite.code] = invite.uses
+        except Exception as e:
+            logger.warning(f"Error caching new invite: {e}")
+
+    @b.event
+    async def on_invite_delete(invite):
+        try:
+            if invite.guild.id in invites_cache:
+                invites_cache[invite.guild.id].pop(invite.code, None)
+        except Exception as e:
+            logger.warning(f"Error removing deleted invite: {e}")
+
+    @b.event
+    async def on_member_join(member: discord.Member):
+        if member.bot:
+            return
+        guild = member.guild
+        cfg = load_config()
+        reward_role_id = cfg.get("invite_reward_role_id")
+        target_count = int(cfg.get("invite_target_count", 2) or 2)
+        announce_channel_id = cfg.get("invite_announce_channel_id")
+
+        inviter = None
+        try:
+            current_invs = await guild.invites()
+            cached = invites_cache.get(guild.id, {})
+            for inv in current_invs:
+                old_uses = cached.get(inv.code, 0)
+                if inv.uses > old_uses:
+                    inviter = inv.inviter
+                    break
+            invites_cache[guild.id] = {inv.code: inv.uses for inv in current_invs}
+        except Exception as e:
+            logger.warning(f"Error checking invites on join: {e}")
+
+        if inviter and not inviter.bot and inviter.id != member.id:
+            invites_data = cfg.setdefault("user_invites", {})
+            u_key = str(inviter.id)
+            cur_count = invites_data.get(u_key, 0) + 1
+            invites_data[u_key] = cur_count
+            save_config(cfg)
+            logger.info(f"[INVITE TRACKER] {inviter} invited {member}. Total: {cur_count}")
+
+            if reward_role_id and cur_count >= target_count:
+                try:
+                    role = guild.get_role(int(reward_role_id))
+                    inviter_member = guild.get_member(inviter.id)
+                    if not inviter_member:
+                        try:
+                            inviter_member = await guild.fetch_member(inviter.id)
+                        except:
+                            inviter_member = None
+
+                    if role and inviter_member and role not in inviter_member.roles:
+                        await inviter_member.add_roles(role, reason=f"FET Invite Reward: Reached {target_count} invites")
+                        logger.info(f"Granted reward role {role.name} to {inviter_member.name}")
+
+                        embed = discord.Embed(
+                            title="🎉 ترقية مكافأة دعوات جديدة | FET STORE",
+                            description=(
+                                f"كفو يا {inviter_member.mention}! 👑\n\n"
+                                f"✨ **أتممت بنجاح دعوة {cur_count} أعضاء للسيرفر!**\n"
+                                f"🎁 **تمت ترقيتك ومنحك رتبة:** {role.mention}\n\n"
+                                f"شكراً لدعمك وتفاعلك معنا في **FET STORE** 💚"
+                            ),
+                            color=discord.Color.from_str("#10d84a")
+                        )
+                        logo_path = os.path.join(ASSETS_DIR, "logo_circle.png")
+                        files = []
+                        if os.path.exists(logo_path):
+                            files.append(discord.File(logo_path, filename="logo_circle.png"))
+                            embed.set_thumbnail(url="attachment://logo_circle.png")
+                            embed.set_footer(text="FET STORE | نظام المكافآت التلقائي", icon_url="attachment://logo_circle.png")
+                        else:
+                            embed.set_footer(text="FET STORE | نظام المكافآت التلقائي")
+
+                        sent = False
+                        if announce_channel_id:
+                            ach = guild.get_channel(int(announce_channel_id))
+                            if ach:
+                                try:
+                                    if files:
+                                        await ach.send(content=f"🎊 ألف مبروك {inviter_member.mention}!", embed=embed, files=files)
+                                    else:
+                                        await ach.send(content=f"🎊 ألف مبروك {inviter_member.mention}!", embed=embed)
+                                    sent = True
+                                except Exception as e:
+                                    logger.warning(f"Could not send to announce channel: {e}")
+                        if not sent and guild.system_channel:
+                            try:
+                                if files:
+                                    await guild.system_channel.send(content=f"🎊 ألف مبروك {inviter_member.mention}!", embed=embed, files=files)
+                                else:
+                                    await guild.system_channel.send(content=f"🎊 ألف مبروك {inviter_member.mention}!", embed=embed)
+                            except:
+                                pass
+                except Exception as e:
+                    logger.error(f"Error rewarding inviter: {e}")
+
 intents = discord.Intents.default()
 intents.guilds = True
 intents.messages = True
 intents.message_content = True
+intents.members = True
+intents.invites = True
 bot = commands.Bot(command_prefix="!", intents=intents)
 setup_bot_handlers(bot)
 
@@ -1640,6 +1806,35 @@ body { background-color:var(--bg-dark); color:var(--text-white); min-height:100v
                         </select>
                         <input type="text" id="reviews-channel-id-manual" class="form-input mt-2" placeholder="أو اكتب Reviews Channel ID يدوياً">
                     </div>
+
+                    <div style="margin: 24px 0 16px 0; border-top: 1px solid rgba(16, 216, 74, 0.2); padding-top: 18px;">
+                        <h3 style="color: var(--neon-green); font-size: 1.1rem; margin-bottom: 8px; display: flex; align-items: center; gap: 8px;">
+                            <span>🎁</span> <span>نظام مكافأة الدعوات (Invite Rewards)</span>
+                        </h3>
+                        <p style="color: var(--text-muted); font-size: 0.85rem; margin-bottom: 16px; line-height: 1.5;">
+                            أي عضو يدعو شخصين (أو العدد المحدد أدناه) يحصل تلقائياً على الرتبة المحددة وتفتح له الرومات المخصصة!
+                        </p>
+                    </div>
+                    <div class="form-group">
+                        <label>👑 رتبة مكافأة الدعوات (Invite Reward Role):</label>
+                        <select id="invite-reward-role-select" class="form-input">
+                            <option value="">-- اختر رتبة مكافأة الدعوات --</option>
+                        </select>
+                        <input type="text" id="invite-reward-role-manual" class="form-input mt-2" placeholder="أو اكتب Reward Role ID يدوياً">
+                    </div>
+                    <div class="form-group">
+                        <label>🎯 عدد الدعوات المطلوبة للمكافأة (Target Invites):</label>
+                        <input type="number" id="invite-target-count" class="form-input" min="1" max="50" value="2" placeholder="مثلاً: 2">
+                        <small class="form-hint">الافتراضي هو شخصين (2) — أول ما يدخلون السيرفر يأخذ الرتبة فوراً.</small>
+                    </div>
+                    <div class="form-group">
+                        <label>📢 روم إعلان المكافأة والترقية (اختياري):</label>
+                        <select id="invite-announce-channel-select" class="form-input">
+                            <option value="">-- اختر روم الإعلان أو اتركه فارغاً --</option>
+                        </select>
+                        <input type="text" id="invite-announce-channel-manual" class="form-input mt-2" placeholder="أو اكتب Announce Channel ID يدوياً">
+                    </div>
+
                     <button id="btn-save-settings" class="btn-primary">
                         <span>💾 حفظ الإعدادات وإعادة تشغيل البوت</span>
                     </button>
@@ -1847,6 +2042,15 @@ async function loadStatus() {
         if (currentConfig.reviews_channel_id && safeElem('reviews-channel-id-manual')) {
             safeElem('reviews-channel-id-manual').value = currentConfig.reviews_channel_id;
         }
+        if (currentConfig.invite_reward_role_id && safeElem('invite-reward-role-manual')) {
+            safeElem('invite-reward-role-manual').value = currentConfig.invite_reward_role_id;
+        }
+        if (currentConfig.invite_target_count && safeElem('invite-target-count')) {
+            safeElem('invite-target-count').value = currentConfig.invite_target_count;
+        }
+        if (currentConfig.invite_announce_channel_id && safeElem('invite-announce-channel-manual')) {
+            safeElem('invite-announce-channel-manual').value = currentConfig.invite_announce_channel_id;
+        }
 
         if (currentConfig.ticket_welcome_title && ticketWelcomeTitle && !ticketWelcomeTitle.dataset.userEdited) {
             ticketWelcomeTitle.value = currentConfig.ticket_welcome_title;
@@ -1877,6 +2081,8 @@ function populateDropdowns(guilds) {
     const rulesChannelSelect = safeElem('rules-channel-select');
     const reviewsChannelSelect = safeElem('reviews-channel-select');
     const staffRoleSelect = safeElem('staff-role-select');
+    const inviteRewardRoleSelect = safeElem('invite-reward-role-select');
+    const inviteAnnounceSelect = safeElem('invite-announce-channel-select');
     const categorySelect = safeElem('ticket-category-select');
     const closedCategorySelect = safeElem('closed-category-select');
 
@@ -1885,6 +2091,8 @@ function populateDropdowns(guilds) {
     if (rulesChannelSelect) rulesChannelSelect.innerHTML = '<option value="">-- اختر الروم --</option>';
     if (reviewsChannelSelect) reviewsChannelSelect.innerHTML = '<option value="">-- اختر روم التقييمات --</option>';
     if (staffRoleSelect) staffRoleSelect.innerHTML = '<option value="">-- اختر الرتبة التي تستقبل التكتات --</option>';
+    if (inviteRewardRoleSelect) inviteRewardRoleSelect.innerHTML = '<option value="">-- اختر رتبة مكافأة الدعوات --</option>';
+    if (inviteAnnounceSelect) inviteAnnounceSelect.innerHTML = '<option value="">-- اختر روم الإعلان أو اتركه فارغاً --</option>';
     if (categorySelect) categorySelect.innerHTML = '<option value="">-- اختر قسم التكتات الفعالة --</option>';
     if (closedCategorySelect) closedCategorySelect.innerHTML = '<option value="">-- اختر قسم التكتات المغلقة --</option>';
 
@@ -1895,11 +2103,13 @@ function populateDropdowns(guilds) {
                 if (updateChannelSelect) updateChannelSelect.add(new Option(`# ${ch.name} (${g.name})`, ch.id));
                 if (rulesChannelSelect) rulesChannelSelect.add(new Option(`# ${ch.name} (${g.name})`, ch.id));
                 if (reviewsChannelSelect) reviewsChannelSelect.add(new Option(`# ${ch.name} (${g.name})`, ch.id));
+                if (inviteAnnounceSelect) inviteAnnounceSelect.add(new Option(`# ${ch.name} (${g.name})`, ch.id));
             });
         }
         if (g.roles) {
             g.roles.forEach(r => {
                 if (staffRoleSelect) staffRoleSelect.add(new Option(`@${r.name}`, r.id));
+                if (inviteRewardRoleSelect) inviteRewardRoleSelect.add(new Option(`@${r.name}`, r.id));
             });
         }
         if (g.categories) {
@@ -1913,6 +2123,8 @@ function populateDropdowns(guilds) {
     if (currentConfig.ticket_channel_id && ticketChannelSelect) ticketChannelSelect.value = currentConfig.ticket_channel_id;
     if (currentConfig.updates_channel_id && updateChannelSelect) updateChannelSelect.value = currentConfig.updates_channel_id;
     if (currentConfig.staff_role_id && staffRoleSelect) staffRoleSelect.value = currentConfig.staff_role_id;
+    if (currentConfig.invite_reward_role_id && inviteRewardRoleSelect) inviteRewardRoleSelect.value = currentConfig.invite_reward_role_id;
+    if (currentConfig.invite_announce_channel_id && inviteAnnounceSelect) inviteAnnounceSelect.value = currentConfig.invite_announce_channel_id;
     if (currentConfig.ticket_category_id && categorySelect) categorySelect.value = currentConfig.ticket_category_id;
     if (currentConfig.closed_category_id && closedCategorySelect) closedCategorySelect.value = currentConfig.closed_category_id;
 
@@ -2151,12 +2363,20 @@ if (btnSaveSettings) {
         const closedManual = safeElem('closed-category-id-manual');
         const reviewsSelect = safeElem('reviews-channel-select');
         const reviewsManual = safeElem('reviews-channel-id-manual');
+        const inviteRoleSelect = safeElem('invite-reward-role-select');
+        const inviteRoleManual = safeElem('invite-reward-role-manual');
+        const inviteTargetInp = safeElem('invite-target-count');
+        const inviteAnnounceSelect = safeElem('invite-announce-channel-select');
+        const inviteAnnounceManual = safeElem('invite-announce-channel-manual');
 
         const token = tokenInp ? tokenInp.value.trim() : '';
         const staffRole = (staffSelect && staffSelect.value) || (staffManual ? staffManual.value.trim() : '');
         const category = (catSelect && catSelect.value) || (catManual ? catManual.value.trim() : '');
         const closedCategory = (closedSelect && closedSelect.value) || (closedManual ? closedManual.value.trim() : '');
         const reviewsChannel = (reviewsSelect && reviewsSelect.value) || (reviewsManual ? reviewsManual.value.trim() : '');
+        const inviteRewardRoleId = (inviteRoleSelect && inviteRoleSelect.value) || (inviteRoleManual ? inviteRoleManual.value.trim() : '');
+        const inviteTargetCount = inviteTargetInp ? (parseInt(inviteTargetInp.value) || 2) : 2;
+        const inviteAnnounceChannelId = (inviteAnnounceSelect && inviteAnnounceSelect.value) || (inviteAnnounceManual ? inviteAnnounceManual.value.trim() : '');
 
         const payload = {
             token: token,
@@ -2164,6 +2384,9 @@ if (btnSaveSettings) {
             ticket_category_id: category,
             closed_category_id: closedCategory,
             reviews_channel_id: reviewsChannel,
+            invite_reward_role_id: inviteRewardRoleId,
+            invite_target_count: inviteTargetCount,
+            invite_announce_channel_id: inviteAnnounceChannelId,
             ticket_welcome_title: ticketWelcomeTitle ? ticketWelcomeTitle.value : '🎟️ تذكرة جديدة | {dept}',
             ticket_welcome_desc: ticketWelcomeDesc ? ticketWelcomeDesc.value : '',
             departments: departmentsList
@@ -2595,9 +2818,14 @@ def bot_worker(token):
             intents.guilds = True
             intents.messages = True
             intents.message_content = True
+            intents.members = True
+            intents.invites = True
             bot = commands.Bot(command_prefix="!", intents=intents)
             setup_bot_handlers(bot)
         asyncio.run(bot.start(token))
+    except discord.errors.PrivilegedIntentsRequired:
+        bot_error_msg = "يرجى تفعيل خيار Server Members Intent من بوابة المطورين (Discord Developer Portal > Bot)"
+        logger.error(f"[BOT LOGIN ERROR] PrivilegedIntentsRequired: Server Members Intent is disabled.")
     except Exception as e:
         bot_error_msg = str(e)
         logger.error(f"[BOT LOGIN ERROR] {e}")
