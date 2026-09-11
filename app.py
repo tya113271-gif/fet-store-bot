@@ -100,6 +100,17 @@ def load_config():
         cfg["admin_users"] = DEFAULT_ADMIN_USERS
         
     cfg.setdefault("reviews_channel_id", DEFAULT_REVIEWS_CHANNEL_ID)
+    
+    custom_b64 = cfg.get("custom_ticket_banner_b64")
+    if custom_b64:
+        custom_path = os.path.join(ASSETS_DIR, "custom_ticket_banner.png")
+        if not os.path.exists(custom_path):
+            try:
+                with open(custom_path, "wb") as f:
+                    f.write(base64.b64decode(custom_b64))
+            except Exception as e:
+                logger.error(f"Error restoring custom ticket banner: {e}")
+
     return cfg
 
 def save_config(cfg):
@@ -1523,44 +1534,96 @@ body { background-color:var(--bg-dark); color:var(--text-white); min-height:100v
                         </button>
                     </div>
 
-                    <div class="panel-card preview-card">
-                        <h2 class="card-title">👁️ معاينة حية في الديسكورد</h2>
-                        <div class="discord-preview-box">
-                            <div class="discord-message">
-                                <img src="/static/img/logo_circle.png" class="discord-avatar" onerror="this.src='/static/img/logo.png'">
-                                <div class="discord-content">
-                                    <div class="discord-header">
-                                        <span class="bot-name">FET Store</span>
-                                        <span class="bot-badge">APP</span>
-                                        <span class="timestamp">اليوم في 11:45 م</span>
-                                    </div>
-                                    <div class="discord-embed" id="preview-embed" style="border-left-color: #10d84a;">
-                                        <div class="embed-body-flex">
-                                            <div class="embed-text-col">
-                                                <h3 class="embed-title" id="preview-title">نظام التذاكر - FET STORE</h3>
-                                                <div class="embed-desc" id="preview-desc">
-                                                    عزيزي العميل، مرحباً بك في متجر FET STORE<br><br>
-                                                    من خلال هذه القائمة يمكنك:<br>
-                                                    • اختيار القسم المناسب لفتح تذكرة دعم فني<br>
-                                                    • سيتم إنشاء روم خاصة بك مع طاقم الدعم<br>
-                                                    • سيقوم فريقنا بالرد عليك في أسرع وقت ممكن
+                    <div class="preview-column" style="display: flex; flex-direction: column; gap: 20px;">
+                        <div class="panel-card preview-card">
+                            <h2 class="card-title">👁️ معاينة حية في الديسكورد</h2>
+                            <div class="discord-preview-box">
+                                <div class="discord-message">
+                                    <img src="/static/img/logo_circle.png" class="discord-avatar" onerror="this.src='/static/img/logo.png'">
+                                    <div class="discord-content">
+                                        <div class="discord-header">
+                                            <span class="bot-name">FET Store</span>
+                                            <span class="bot-badge">APP</span>
+                                            <span class="timestamp">اليوم في 11:45 م</span>
+                                        </div>
+                                        <div class="discord-embed" id="preview-embed" style="border-left-color: #10d84a;">
+                                            <div class="embed-body-flex">
+                                                <div class="embed-text-col">
+                                                    <h3 class="embed-title" id="preview-title">نظام التذاكر - FET STORE</h3>
+                                                    <div class="embed-desc" id="preview-desc">
+                                                        عزيزي العميل، مرحباً بك في متجر FET STORE<br><br>
+                                                        من خلال هذه القائمة يمكنك:<br>
+                                                        • اختيار القسم المناسب لفتح تذكرة دعم فني<br>
+                                                        • سيتم إنشاء روم خاصة بك مع طاقم الدعم<br>
+                                                        • سيقوم فريقنا بالرد عليك في أسرع وقت ممكن
+                                                    </div>
                                                 </div>
+                                                <img src="/static/img/logo_circle.png" class="embed-thumbnail" onerror="this.src='/static/img/logo.png'" style="border-radius:50%; width:70px; height:70px;">
                                             </div>
-                                            <img src="/static/img/logo_circle.png" class="embed-thumbnail" onerror="this.src='/static/img/logo.png'" style="border-radius:50%; width:70px; height:70px;">
+                                            <div class="embed-banner-container">
+                                                <img src="/static/img/ticket_banner.png" id="preview-ticket-banner" class="embed-banner">
+                                            </div>
+                                            <div class="embed-footer">
+                                                <img src="/static/img/logo_circle.png" class="footer-icon" onerror="this.src='/static/img/logo.png'">
+                                                <span>FET STORE | خدمة العملاء والدعم الفني</span>
+                                            </div>
                                         </div>
-                                        <div class="embed-banner-container">
-                                            <img src="/static/img/ticket_banner.png" class="embed-banner">
+                                        <div class="discord-select-menu" id="preview-select-box">
+                                            <span class="select-text" id="preview-select-placeholder">اختر نوع الخدمة المطلوبة - 📁</span>
+                                            <span class="select-arrow">▼</span>
                                         </div>
-                                        <div class="embed-footer">
-                                            <img src="/static/img/logo_circle.png" class="footer-icon" onerror="this.src='/static/img/logo.png'">
-                                            <span>FET STORE | خدمة العملاء والدعم الفني</span>
-                                        </div>
-                                    </div>
-                                    <div class="discord-select-menu" id="preview-select-box">
-                                        <span class="select-text" id="preview-select-placeholder">اختر نوع الخدمة المطلوبة - 📁</span>
-                                        <span class="select-arrow">▼</span>
                                     </div>
                                 </div>
+                            </div>
+                        </div>
+
+                        <!-- New Banner Customizer Card -->
+                        <div class="panel-card banner-upload-card" id="ticket-banner-card">
+                            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:14px; border-bottom:1px solid var(--border-color); padding-bottom:8px;">
+                                <h2 class="card-title" style="margin:0; border:none; padding:0;">🖼️ رفع وتخصيص بنر التكت (Banner)</h2>
+                                <span id="banner-status-badge" style="font-size:11px; padding:4px 10px; border-radius:12px; background:rgba(16,216,74,0.12); color:var(--neon-green); font-weight:800; border:1px solid rgba(16,216,74,0.3);">
+                                    البنر الافتراضي
+                                </span>
+                            </div>
+
+                            <!-- Banner Size & Dimensions Guide Box -->
+                            <div style="background:rgba(16,216,74,0.06); border:1px solid rgba(16,216,74,0.25); border-radius:10px; padding:14px; margin-bottom:16px;">
+                                <div style="display:flex; align-items:center; gap:8px; margin-bottom:6px;">
+                                    <span style="font-size:16px;">📐</span>
+                                    <strong style="color:var(--neon-green); font-size:13px;">المقاس الموصى به والمضبوط 100%:</strong>
+                                </div>
+                                <p style="font-size:12px; color:#d0e2d0; margin:0 0 8px 0; line-height:1.6;">
+                                    المقاس المثالي لإيمبد الديسكورد هو أبعاد <strong style="color:#fff;">1920 × 1080 بكسل</strong> (أو أي نسبة <strong style="color:#fff;">16:9</strong> مثل <strong style="color:#fff;">1280 × 720</strong> أو <strong style="color:#fff;">960 × 540</strong>).
+                                </p>
+                                <div style="display:flex; flex-wrap:wrap; gap:12px; font-size:11px; color:var(--text-muted);">
+                                    <span>✅ يملأ كادر الرسالة بالكامل</span>
+                                    <span>✅ بدون أي قص بالحواف بالجوال والكمبيوتر</span>
+                                    <span>✅ الحجم الأقصى: 8MB</span>
+                                </div>
+                            </div>
+
+                            <!-- Upload Drop Zone -->
+                            <div id="banner-drop-zone" style="border:2px dashed rgba(16,216,74,0.4); border-radius:10px; padding:20px 16px; text-align:center; background:rgba(0,0,0,0.25); cursor:pointer; transition:all 0.2s ease;">
+                                <input type="file" id="ticket-banner-file-input" accept="image/*" style="display:none;">
+                                <div id="banner-drop-content">
+                                    <div style="font-size:28px; margin-bottom:6px;">📤</div>
+                                    <p style="font-size:13px; font-weight:800; color:var(--text-white); margin:0 0 4px 0;">اضغط لاختيار صورة البنر أو اسحبها وأفلتها هنا</p>
+                                    <small style="font-size:11px; color:var(--text-muted);">يدعم صيغ PNG, JPG, GIF, WebP (تظهر المعاينة الحية فوراً)</small>
+                                </div>
+                                <div id="banner-selected-info" class="hidden" style="margin-top:10px; padding-top:8px; border-top:1px dashed rgba(16,216,74,0.2);">
+                                    <span id="banner-file-name" style="color:var(--neon-green); font-weight:800; font-size:12px;"></span>
+                                    <span id="banner-file-dim" style="color:#b0c2b0; font-size:11px; margin-right:8px;"></span>
+                                </div>
+                            </div>
+
+                            <!-- Action Buttons -->
+                            <div style="display:flex; gap:10px; margin-top:14px;">
+                                <button type="button" id="btn-save-banner" class="btn-primary" style="flex:2; margin-top:0; padding:10px; opacity:0.6;" disabled>
+                                    <span>💾 حفظ واعتماد البنر الجديد</span>
+                                </button>
+                                <button type="button" id="btn-reset-banner" class="btn-secondary" style="flex:1; padding:10px; border-color:rgba(239,68,68,0.4); color:#fca5a5;">
+                                    <span>🔄 استعادة الافتراضي</span>
+                                </button>
                             </div>
                         </div>
                     </div>
@@ -2027,6 +2090,28 @@ async function loadStatus() {
             if (botProfileCard) botProfileCard.classList.add('hidden');
         }
 
+        if (!pendingBannerDataUrl) {
+            const previewTicketBanner = safeElem('preview-ticket-banner');
+            const bannerStatusBadge = safeElem('banner-status-badge');
+            if (data.has_custom_ticket_banner) {
+                if (previewTicketBanner) {
+                    previewTicketBanner.src = '/static/img/custom_ticket_banner.png?v=' + Date.now();
+                }
+                if (bannerStatusBadge) {
+                    bannerStatusBadge.innerText = '✅ بنر مخصص مفعل';
+                    bannerStatusBadge.style.borderColor = 'rgba(16,216,74,0.6)';
+                }
+            } else {
+                if (previewTicketBanner) {
+                    previewTicketBanner.src = '/static/img/ticket_banner.png';
+                }
+                if (bannerStatusBadge) {
+                    bannerStatusBadge.innerText = 'البنر الافتراضي';
+                    bannerStatusBadge.style.borderColor = 'rgba(16,216,74,0.3)';
+                }
+            }
+        }
+
         if (currentConfig.token && safeElem('token-input')) {
             safeElem('token-input').value = currentConfig.token;
         }
@@ -2247,7 +2332,156 @@ if (btnChangePwd) {
             if (r.status === 'ok') {
                 showToast('✅ ' + r.message);
                 if (pInp) pInp.value = '';
-            } else showToast('❌ خطأ: ' + r.message);
+            } else {
+                showToast('❌ خطأ: ' + r.message);
+            }
+        } catch (e) {
+            showToast('❌ خطأ: ' + e.message);
+        }
+    });
+}
+
+// [[ Custom Ticket Banner Drag & Drop & Upload ]] //
+let pendingBannerDataUrl = null;
+const bannerDropZone = safeElem('banner-drop-zone');
+const bannerFileInput = safeElem('ticket-banner-file-input');
+const btnSaveBanner = safeElem('btn-save-banner');
+const btnResetBanner = safeElem('btn-reset-banner');
+const previewTicketBanner = safeElem('preview-ticket-banner');
+const bannerStatusBadge = safeElem('banner-status-badge');
+const bannerSelectedInfo = safeElem('banner-selected-info');
+const bannerFileName = safeElem('banner-file-name');
+const bannerFileDim = safeElem('banner-file-dim');
+
+function handleBannerFile(file) {
+    if (!file || !file.type.startsWith('image/')) {
+        showToast('⚠️ يرجى اختيار ملف صورة صالح (PNG / JPG / WebP / GIF)!');
+        return;
+    }
+    if (file.size > 8 * 1024 * 1024) {
+        showToast('⚠️ حجم الصورة أكبر من 8 ميجابايت!');
+        return;
+    }
+
+    const reader = new FileReader();
+    reader.onload = (e) => {
+        pendingBannerDataUrl = e.target.result;
+        if (previewTicketBanner) {
+            previewTicketBanner.src = pendingBannerDataUrl;
+        }
+
+        const img = new Image();
+        img.onload = () => {
+            const w = img.naturalWidth;
+            const h = img.naturalHeight;
+            let ratioNote = '';
+            if (Math.abs(w / h - 16 / 9) < 0.1) {
+                ratioNote = ' (نسبة 16:9 مضبوطة 100%! 🎯)';
+            } else if (Math.abs(w / h - 2 / 1) < 0.1) {
+                ratioNote = ' (نسبة 2:1 ممتازة 👍)';
+            }
+            if (bannerSelectedInfo) bannerSelectedInfo.classList.remove('hidden');
+            if (bannerFileName) bannerFileName.innerText = file.name;
+            if (bannerFileDim) bannerFileDim.innerText = `[${w} × ${h} بكسل]${ratioNote}`;
+        };
+        img.src = pendingBannerDataUrl;
+
+        if (btnSaveBanner) {
+            btnSaveBanner.disabled = false;
+            btnSaveBanner.style.opacity = '1';
+        }
+        showToast('👁️ تم تحديث المعاينة الحية! اضغط "حفظ واعتماد البنر" لتثبيته.');
+    };
+    reader.readAsDataURL(file);
+}
+
+if (bannerDropZone && bannerFileInput) {
+    bannerDropZone.addEventListener('click', () => {
+        bannerFileInput.click();
+    });
+
+    bannerDropZone.addEventListener('dragover', (e) => {
+        e.preventDefault();
+        bannerDropZone.style.borderColor = 'var(--neon-green)';
+        bannerDropZone.style.background = 'rgba(16,216,74,0.12)';
+    });
+
+    bannerDropZone.addEventListener('dragleave', () => {
+        bannerDropZone.style.borderColor = 'rgba(16,216,74,0.4)';
+        bannerDropZone.style.background = 'rgba(0,0,0,0.25)';
+    });
+
+    bannerDropZone.addEventListener('drop', (e) => {
+        e.preventDefault();
+        bannerDropZone.style.borderColor = 'rgba(16,216,74,0.4)';
+        bannerDropZone.style.background = 'rgba(0,0,0,0.25)';
+        if (e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files.length > 0) {
+            handleBannerFile(e.dataTransfer.files[0]);
+        }
+    });
+
+    bannerFileInput.addEventListener('change', (e) => {
+        if (e.target.files && e.target.files.length > 0) {
+            handleBannerFile(e.target.files[0]);
+        }
+    });
+}
+
+if (btnSaveBanner) {
+    btnSaveBanner.addEventListener('click', async () => {
+        if (!pendingBannerDataUrl) {
+            return showToast('⚠️ يرجى اختيار صورة البنر أولاً!');
+        }
+        try {
+            showToast('⏳ جاري رفع وحفظ البنر الجديد...');
+            const res = await fetch('/api/ticket/banner/upload', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ image_b64: pendingBannerDataUrl })
+            });
+            const result = await res.json();
+            if (result.status === 'ok') {
+                showToast('✅ تم حفظ البنر الجديد بنجاح واعتماده في رسائل التكت!');
+                if (bannerStatusBadge) {
+                    bannerStatusBadge.innerText = '✅ بنر مخصص مفعل';
+                    bannerStatusBadge.style.borderColor = 'rgba(16,216,74,0.6)';
+                }
+                btnSaveBanner.disabled = true;
+                btnSaveBanner.style.opacity = '0.6';
+            } else {
+                showToast('❌ خطأ: ' + result.message);
+            }
+        } catch (e) {
+            showToast('❌ تعذر رفع البنر: ' + e.message);
+        }
+    });
+}
+
+if (btnResetBanner) {
+    btnResetBanner.addEventListener('click', async () => {
+        try {
+            showToast('⏳ جاري استعادة البنر الافتراضي...');
+            const res = await fetch('/api/ticket/banner/reset', { method: 'POST' });
+            const result = await res.json();
+            if (result.status === 'ok') {
+                showToast('✅ تمت استعادة البنر الافتراضي للمتجر بنجاح!');
+                pendingBannerDataUrl = null;
+                if (previewTicketBanner) {
+                    previewTicketBanner.src = '/static/img/ticket_banner.png?v=' + Date.now();
+                }
+                if (bannerStatusBadge) {
+                    bannerStatusBadge.innerText = 'البنر الافتراضي';
+                    bannerStatusBadge.style.borderColor = 'rgba(16,216,74,0.3)';
+                }
+                if (bannerSelectedInfo) bannerSelectedInfo.classList.add('hidden');
+                if (bannerFileInput) bannerFileInput.value = '';
+                if (btnSaveBanner) {
+                    btnSaveBanner.disabled = true;
+                    btnSaveBanner.style.opacity = '0.6';
+                }
+            } else {
+                showToast('❌ خطأ: ' + result.message);
+            }
         } catch (e) {
             showToast('❌ خطأ: ' + e.message);
         }
@@ -2503,11 +2737,13 @@ def api_status():
                 "categories": categories
             })
             
+    has_custom_banner = os.path.exists(os.path.join(ASSETS_DIR, "custom_ticket_banner.png")) or bool(cfg.get("custom_ticket_banner_b64"))
     return jsonify({
         "online": is_online,
         "bot_user": str(bot.user) if is_online else None,
         "bot_avatar": str(bot.user.avatar.url) if is_online and bot.user.avatar else None,
         "bot_error": bot_error_msg,
+        "has_custom_ticket_banner": has_custom_banner,
         "config": cfg,
         "guilds": guilds_data
     })
@@ -2617,6 +2853,65 @@ def api_config_save():
         
     return jsonify({"status": "ok", "message": "تم حفظ الإعدادات بنجاح!"})
 
+@app.route("/api/ticket/banner/upload", methods=["POST"])
+@login_required
+def api_ticket_banner_upload():
+    try:
+        data = request.json or {}
+        b64_str = data.get("image_b64", "")
+        if not b64_str and "file" in request.files:
+            f = request.files["file"]
+            b64_str = base64.b64encode(f.read()).decode("utf-8")
+        elif "," in b64_str:
+            b64_str = b64_str.split(",", 1)[1]
+
+        if not b64_str:
+            return jsonify({"status": "error", "message": "لم يتم إرسال أي صورة!"}), 400
+
+        raw_bytes = base64.b64decode(b64_str)
+        if len(raw_bytes) > 10 * 1024 * 1024:
+            return jsonify({"status": "error", "message": "حجم الصورة كبير جداً! الحد الأقصى 8 ميجابايت."}), 400
+
+        custom_path = os.path.join(ASSETS_DIR, "custom_ticket_banner.png")
+        with open(custom_path, "wb") as f:
+            f.write(raw_bytes)
+
+        cfg = load_config()
+        cfg["custom_ticket_banner_b64"] = b64_str
+        save_config(cfg)
+
+        return jsonify({
+            "status": "ok",
+            "message": "تم حفظ البنر الجديد بنجاح واعتماده في رسائل التكت!",
+            "url": "/static/img/custom_ticket_banner.png"
+        })
+    except Exception as e:
+        logger.error(f"Error uploading custom ticket banner: {e}")
+        return jsonify({"status": "error", "message": f"فشل رفع الصورة: {e}"}), 500
+
+@app.route("/api/ticket/banner/reset", methods=["POST"])
+@login_required
+def api_ticket_banner_reset():
+    try:
+        cfg = load_config()
+        cfg.pop("custom_ticket_banner_b64", None)
+        save_config(cfg)
+
+        custom_path = os.path.join(ASSETS_DIR, "custom_ticket_banner.png")
+        if os.path.exists(custom_path):
+            try:
+                os.remove(custom_path)
+            except Exception as e:
+                logger.warning(f"Could not remove custom banner: {e}")
+
+        return jsonify({
+            "status": "ok",
+            "message": "تمت استعادة البنر الافتراضي للمتجر بنجاح!",
+            "url": "/static/img/ticket_banner.png"
+        })
+    except Exception as e:
+        return jsonify({"status": "error", "message": f"فشل الاستعادة: {e}"}), 500
+
 @app.route("/api/ticket/send", methods=["POST"])
 @login_required
 def api_ticket_send():
@@ -2659,7 +2954,9 @@ def api_ticket_send():
         if not os.path.exists(logo_path):
             logo_path = os.path.join(ASSETS_DIR, "logo.png")
             
-        banner_path = os.path.join(ASSETS_DIR, "ticket_banner.png")
+        banner_path = os.path.join(ASSETS_DIR, "custom_ticket_banner.png")
+        if not os.path.exists(banner_path):
+            banner_path = os.path.join(ASSETS_DIR, "ticket_banner.png")
         
         if os.path.exists(logo_path):
             files.append(discord.File(logo_path, filename="logo_circle.png"))
