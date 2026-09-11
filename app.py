@@ -983,6 +983,18 @@ def setup_bot_handlers(b):
             return
         guild = member.guild
         cfg = load_config()
+
+        # [[ Auto-Role on Member Join ]] #
+        auto_role_id = cfg.get("auto_role_id")
+        if auto_role_id:
+            try:
+                role = guild.get_role(int(auto_role_id))
+                if role and role not in member.roles:
+                    await member.add_roles(role, reason="FET Auto-Role: New Member Joined")
+                    logger.info(f"Assigned auto-role {role.name} to new member {member.name}")
+            except Exception as e:
+                logger.warning(f"Could not assign auto-role to {member.name}: {e}")
+
         reward_role_id = cfg.get("invite_reward_role_id")
         target_count = int(cfg.get("invite_target_count", 2) or 2)
         announce_channel_id = cfg.get("invite_announce_channel_id")
@@ -1872,6 +1884,23 @@ body { background-color:var(--bg-dark); color:var(--text-white); min-height:100v
 
                     <div style="margin: 24px 0 16px 0; border-top: 1px solid rgba(16, 216, 74, 0.2); padding-top: 18px;">
                         <h3 style="color: var(--neon-green); font-size: 1.1rem; margin-bottom: 8px; display: flex; align-items: center; gap: 8px;">
+                            <span>⚡</span> <span>رتبة الدخول التلقائية للأعضاء (Auto-Role on Join)</span>
+                        </h3>
+                        <p style="color: var(--text-muted); font-size: 0.85rem; margin-bottom: 16px; line-height: 1.5;">
+                            أي شخص يدخل السيرفر يحصل على هذه الرتبة فوراً وبشكل تلقائي بدون أي انتظار!
+                        </p>
+                    </div>
+                    <div class="form-group">
+                        <label>🎖️ رتبة العضو الجديد (Auto-Role):</label>
+                        <select id="auto-role-select" class="form-input">
+                            <option value="">-- اختر الرتبة التي تُعطى للعضو الجديد فور دخوله --</option>
+                        </select>
+                        <input type="text" id="auto-role-id-manual" class="form-input mt-2" placeholder="أو اكتب Auto-Role ID يدوياً">
+                        <small class="form-hint">تأكد أن رتبة البوت في سيرفر الديسكورد أعلى من هذه الرتبة حتى يستطيع منحها للأعضاء.</small>
+                    </div>
+
+                    <div style="margin: 24px 0 16px 0; border-top: 1px solid rgba(16, 216, 74, 0.2); padding-top: 18px;">
+                        <h3 style="color: var(--neon-green); font-size: 1.1rem; margin-bottom: 8px; display: flex; align-items: center; gap: 8px;">
                             <span>🎁</span> <span>نظام مكافأة الدعوات (Invite Rewards)</span>
                         </h3>
                         <p style="color: var(--text-muted); font-size: 0.85rem; margin-bottom: 16px; line-height: 1.5;">
@@ -2127,6 +2156,9 @@ async function loadStatus() {
         if (currentConfig.reviews_channel_id && safeElem('reviews-channel-id-manual')) {
             safeElem('reviews-channel-id-manual').value = currentConfig.reviews_channel_id;
         }
+        if (currentConfig.auto_role_id && safeElem('auto-role-id-manual')) {
+            safeElem('auto-role-id-manual').value = currentConfig.auto_role_id;
+        }
         if (currentConfig.invite_reward_role_id && safeElem('invite-reward-role-manual')) {
             safeElem('invite-reward-role-manual').value = currentConfig.invite_reward_role_id;
         }
@@ -2166,6 +2198,7 @@ function populateDropdowns(guilds) {
     const rulesChannelSelect = safeElem('rules-channel-select');
     const reviewsChannelSelect = safeElem('reviews-channel-select');
     const staffRoleSelect = safeElem('staff-role-select');
+    const autoRoleSelect = safeElem('auto-role-select');
     const inviteRewardRoleSelect = safeElem('invite-reward-role-select');
     const inviteAnnounceSelect = safeElem('invite-announce-channel-select');
     const categorySelect = safeElem('ticket-category-select');
@@ -2176,6 +2209,7 @@ function populateDropdowns(guilds) {
     if (rulesChannelSelect) rulesChannelSelect.innerHTML = '<option value="">-- اختر الروم --</option>';
     if (reviewsChannelSelect) reviewsChannelSelect.innerHTML = '<option value="">-- اختر روم التقييمات --</option>';
     if (staffRoleSelect) staffRoleSelect.innerHTML = '<option value="">-- اختر الرتبة التي تستقبل التكتات --</option>';
+    if (autoRoleSelect) autoRoleSelect.innerHTML = '<option value="">-- اختر الرتبة التي تُعطى للعضو الجديد فور دخوله --</option>';
     if (inviteRewardRoleSelect) inviteRewardRoleSelect.innerHTML = '<option value="">-- اختر رتبة مكافأة الدعوات --</option>';
     if (inviteAnnounceSelect) inviteAnnounceSelect.innerHTML = '<option value="">-- اختر روم الإعلان أو اتركه فارغاً --</option>';
     if (categorySelect) categorySelect.innerHTML = '<option value="">-- اختر قسم التكتات الفعالة --</option>';
@@ -2194,6 +2228,7 @@ function populateDropdowns(guilds) {
         if (g.roles) {
             g.roles.forEach(r => {
                 if (staffRoleSelect) staffRoleSelect.add(new Option(`@${r.name}`, r.id));
+                if (autoRoleSelect) autoRoleSelect.add(new Option(`@${r.name}`, r.id));
                 if (inviteRewardRoleSelect) inviteRewardRoleSelect.add(new Option(`@${r.name}`, r.id));
             });
         }
@@ -2208,6 +2243,7 @@ function populateDropdowns(guilds) {
     if (currentConfig.ticket_channel_id && ticketChannelSelect) ticketChannelSelect.value = currentConfig.ticket_channel_id;
     if (currentConfig.updates_channel_id && updateChannelSelect) updateChannelSelect.value = currentConfig.updates_channel_id;
     if (currentConfig.staff_role_id && staffRoleSelect) staffRoleSelect.value = currentConfig.staff_role_id;
+    if (currentConfig.auto_role_id && autoRoleSelect) autoRoleSelect.value = currentConfig.auto_role_id;
     if (currentConfig.invite_reward_role_id && inviteRewardRoleSelect) inviteRewardRoleSelect.value = currentConfig.invite_reward_role_id;
     if (currentConfig.invite_announce_channel_id && inviteAnnounceSelect) inviteAnnounceSelect.value = currentConfig.invite_announce_channel_id;
     if (currentConfig.ticket_category_id && categorySelect) categorySelect.value = currentConfig.ticket_category_id;
@@ -2591,6 +2627,8 @@ if (btnSaveSettings) {
         const tokenInp = safeElem('token-input');
         const staffSelect = safeElem('staff-role-select');
         const staffManual = safeElem('staff-role-id-manual');
+        const autoRoleSelect = safeElem('auto-role-select');
+        const autoRoleManual = safeElem('auto-role-id-manual');
         const catSelect = safeElem('ticket-category-select');
         const catManual = safeElem('category-id-manual');
         const closedSelect = safeElem('closed-category-select');
@@ -2605,6 +2643,7 @@ if (btnSaveSettings) {
 
         const token = tokenInp ? tokenInp.value.trim() : '';
         const staffRole = (staffSelect && staffSelect.value) || (staffManual ? staffManual.value.trim() : '');
+        const autoRoleId = (autoRoleSelect && autoRoleSelect.value) || (autoRoleManual ? autoRoleManual.value.trim() : '');
         const category = (catSelect && catSelect.value) || (catManual ? catManual.value.trim() : '');
         const closedCategory = (closedSelect && closedSelect.value) || (closedManual ? closedManual.value.trim() : '');
         const reviewsChannel = (reviewsSelect && reviewsSelect.value) || (reviewsManual ? reviewsManual.value.trim() : '');
@@ -2615,6 +2654,7 @@ if (btnSaveSettings) {
         const payload = {
             token: token,
             staff_role_id: staffRole,
+            auto_role_id: autoRoleId,
             ticket_category_id: category,
             closed_category_id: closedCategory,
             reviews_channel_id: reviewsChannel,
