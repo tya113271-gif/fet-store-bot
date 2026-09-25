@@ -11,10 +11,10 @@
     <!-- Top Header -->
     <header class="dashboard-header">
         <div class="header-brand">
-            <img src="/static/img/logo.png" alt="FET STORE Logo" class="brand-logo">
+            <img src="/static/img/logo_circle.png" alt="FET STORE Logo" class="brand-logo" onerror="this.src='/static/img/logo.png'">
             <div class="brand-text">
                 <h1>FET <span class="accent">STORE</span></h1>
-                <p>لوحة التحكم بالبوت ونظام التكتات والتحديثات</p>
+                <p>لوحة التحكم بالبوت ونظام التكتات والتحديثات والقوانين</p>
             </div>
         </div>
         <div class="header-status">
@@ -23,8 +23,8 @@
                 <span class="status-text" id="bot-status-text">جاري فحص الاتصال...</span>
             </div>
             <div class="bot-info-card hidden" id="bot-profile-card">
-                <img src="/static/img/logo.png" id="bot-avatar" class="bot-avatar">
-                <span class="bot-tag" id="bot-username">New Day Bot</span>
+                <img src="/static/img/logo_circle.png" id="bot-avatar" class="bot-avatar" onerror="this.src='/static/img/logo.png'">
+                <span class="bot-tag" id="bot-username">FET Store Bot</span>
             </div>
         </div>
     </header>
@@ -40,6 +40,10 @@
             <button class="nav-btn" data-tab="updates-tab">
                 <span class="nav-icon">📢</span>
                 <span class="nav-title">نشر التحديثات (Updates)</span>
+            </button>
+            <button class="nav-btn" data-tab="rules-tab">
+                <span class="nav-icon">📜</span>
+                <span class="nav-title">نشر القوانين (Rules)</span>
             </button>
             <button class="nav-btn" data-tab="settings-tab">
                 <span class="nav-icon">⚙️</span>
@@ -66,7 +70,7 @@
 
                         <div class="form-group">
                             <label>📝 عنوان الرسالة (Embed Title):</label>
-                            <input type="text" id="ticket-title-input" class="form-input" value="FET STORE - Support & Ticket System">
+                            <input type="text" id="ticket-title-input" class="form-input" value="نظام التذاكر - FET STORE">
                         </div>
 
                         <div class="form-group">
@@ -81,7 +85,7 @@
 
                         <div class="form-group">
                             <label>📂 النص الظاهر بقائمة الاختيار (Dropdown Placeholder):</label>
-                            <input type="text" id="ticket-placeholder-input" class="form-input" value="📂 - اختر نوع الخدمة المطلوبة">
+                            <input type="text" id="ticket-placeholder-input" class="form-input" value="اختر نوع الخدمة المطلوبة - 📁">
                         </div>
 
                         <div class="form-group">
@@ -94,29 +98,28 @@
                         </button>
                     </div>
 
-                    <!-- Live Discord Preview (مطابقة الديسكورد 100%) -->
+                    <!-- Live Discord Preview -->
                     <div class="panel-card preview-card">
                         <h2 class="card-title">👁️ معاينة حية في الديسكورد</h2>
                         <div class="discord-preview-box">
                             <div class="discord-message">
-                                <img src="/static/img/logo.png" class="discord-avatar">
+                                <img src="/static/img/logo_circle.png" class="discord-avatar" onerror="this.src='/static/img/logo.png'">
                                 <div class="discord-content">
                                     <div class="discord-header">
-                                        <span class="bot-name">FET STORE BOT</span>
+                                        <span class="bot-name">FET Store</span>
                                         <span class="bot-badge">APP</span>
                                         <span class="timestamp">Today at 11:45 PM</span>
                                     </div>
                                     
-                                    <!-- Discord Embed matching user's image -->
-                                    <div class="discord-embed" id="preview-embed" style="border-right-color: #00ff41;">
+                                    <div class="discord-embed" id="preview-embed" style="border-left-color: #00ff41;">
                                         <div class="embed-author">
-                                            <img src="/static/img/logo.png" class="author-icon">
+                                            <img src="/static/img/logo_circle.png" class="author-icon" onerror="this.src='/static/img/logo.png'">
                                             <span id="preview-author-text">FET STORE - Official Ticket System</span>
                                         </div>
 
                                         <div class="embed-body-flex">
                                             <div class="embed-text-col">
-                                                <h3 class="embed-title" id="preview-title">FET STORE - Support & Ticket System</h3>
+                                                <h3 class="embed-title" id="preview-title">نظام التذاكر - FET STORE</h3>
                                                 <div class="embed-desc" id="preview-desc">
                                                     عزيزي العضو / Dear Member<br><br>
                                                     من خلال هذه القائمة يمكنك:<br>
@@ -125,24 +128,21 @@
                                                     • سيقوم فريقنا بالرد عليك في أسرع وقت ممكن
                                                 </div>
                                             </div>
-                                            <!-- Top Right Thumbnail matching Image 4 -->
-                                            <img src="/static/img/logo.png" class="embed-thumbnail">
+                                            <img src="/static/img/logo_circle.png" class="embed-thumbnail" onerror="this.src='/static/img/logo.png'" style="border-radius:50%; width:70px; height:70px;">
                                         </div>
 
-                                        <!-- Bottom Banner matching Image 4 -->
                                         <div class="embed-banner-container">
-                                            <img src="/static/img/ticket_banner.png" class="embed-banner">
+                                            <img src="/static/img/ticket_banner.png" class="embed-banner" onerror="this.style.display='none'">
                                         </div>
 
                                         <div class="embed-footer">
-                                            <img src="/static/img/logo.png" class="footer-icon">
+                                            <img src="/static/img/logo_circle.png" class="footer-icon" onerror="this.src='/static/img/logo.png'">
                                             <span>FET STORE | Best Quality Products</span>
                                         </div>
                                     </div>
 
-                                    <!-- Dropdown Select Menu matching user's image -->
                                     <div class="discord-select-menu">
-                                        <span class="select-text" id="preview-select-placeholder">📂 - اختر نوع الخدمة المطلوبة</span>
+                                        <span class="select-text" id="preview-select-placeholder">اختر نوع الخدمة المطلوبة - 📁</span>
                                         <span class="select-arrow">▼</span>
                                     </div>
                                 </div>
@@ -192,16 +192,16 @@
                         <h2 class="card-title">👁️ معاينة رسالة التحديث في الديسكورد</h2>
                         <div class="discord-preview-box">
                             <div class="discord-message">
-                                <img src="/static/img/logo.png" class="discord-avatar">
+                                <img src="/static/img/logo_circle.png" class="discord-avatar" onerror="this.src='/static/img/logo.png'">
                                 <div class="discord-content">
                                     <div class="discord-header">
-                                        <span class="bot-name">FET STORE BOT</span>
+                                        <span class="bot-name">FET Store</span>
                                         <span class="bot-badge">APP</span>
                                         <span class="timestamp">Today at 11:50 PM</span>
                                     </div>
                                     <div class="discord-mention-tag">@everyone 📢 تحديث جديد في متجر <strong>FET STORE</strong></div>
                                     
-                                    <div class="discord-embed" style="border-right-color: #00ff41;">
+                                    <div class="discord-embed" style="border-left-color: #00ff41;">
                                         <div class="embed-body-flex">
                                             <div class="embed-text-col">
                                                 <h3 class="embed-title" id="preview-update-title">🚀 تم تحديث المنتج: FET INVENTORY V1.0</h3>
@@ -211,12 +211,11 @@
                                                     • دعم كامل للسحب والإفلات
                                                 </div>
                                             </div>
-                                            <!-- Top Right Logo Thumbnail -->
-                                            <img src="/static/img/logo.png" class="embed-thumbnail">
+                                            <img src="/static/img/logo_circle.png" class="embed-thumbnail" onerror="this.src='/static/img/logo.png'" style="border-radius:50%; width:70px; height:70px;">
                                         </div>
 
                                         <div class="embed-footer">
-                                            <img src="/static/img/logo.png" class="footer-icon">
+                                            <img src="/static/img/logo_circle.png" class="footer-icon" onerror="this.src='/static/img/logo.png'">
                                             <span>FET STORE | New Update Released</span>
                                         </div>
                                     </div>
@@ -227,7 +226,112 @@
                 </div>
             </section>
 
-            <!-- Tab 3: Settings -->
+            <!-- Tab 3: Rules Broadcaster -->
+            <section class="tab-pane" id="rules-tab">
+                <div class="pane-grid">
+                    <div class="panel-card form-card">
+                        <h2 class="card-title">📜 نشر وتخصيص قوانين السيرفر</h2>
+                        
+                        <div class="form-group">
+                            <label>📍 الروم المراد نشر القوانين فيها (روم القوانين):</label>
+                            <select id="rules-channel-select" class="form-input">
+                                <option value="">-- اختر الروم --</option>
+                            </select>
+                        </div>
+
+                        <div class="form-group">
+                            <label>🏷️ عنوان رسالة القوانين (Embed Title):</label>
+                            <input type="text" id="rules-title-input" class="form-input" value="FET STORE سياسة">
+                        </div>
+
+                        <div class="form-group">
+                            <label>📝 المقدمة / الترحيب (Introduction):</label>
+                            <input type="text" id="rules-subtitle-input" class="form-input" value="نرجو من جميع الأعضاء والعملاء الكرام الالتزام بالتعليمات التالية لضمان أفضل تجربة:">
+                        </div>
+
+                        <div class="form-group">
+                            <label>📋 بنود القوانين (سطر تحت الثاني):</label>
+                            <textarea id="rules-text-input" class="form-input" rows="11">🔹 1. شرائك من متجرنا موافقة على جميع الاحكام والشروط لدى سياستنا.
+🔹 2. كتصنيف للمنتجات الرقمية لدينا فهي غير قابلة للاسترداد او الاسترجاع.
+🔹 3. يمنع فتح التكت بدون سبب أو تكرار المنشن للإدارة.
+🔹 4. نحمل عدة طرق بيع يمكن الشراء من خلالها ثم استلام منتجك.
+🔹 5. بعد اتمام الدفع يصلك المنتج في الكي ماستر ويمكنك تنزيله.
+🔹 6. لسنا مسؤولين عن فقدان او تلف معلومات المنتج بعد تسليمها.
+
++ هام
+لايسمح لاي عميل بيع او اعادة توزيع او فك شفرات المنتج وبيعه وهذا يعد عمل لايسمح به عند الله وداخل المجتمع القانوني</textarea>
+                        </div>
+
+                        <div class="form-group">
+                            <label>🎨 لون الإطار (Hex Color):</label>
+                            <input type="color" id="rules-color-input" class="color-picker" value="#00ff41">
+                        </div>
+
+                        <div class="form-group" style="display:flex; align-items:center; gap:8px;">
+                            <input type="checkbox" id="rules-banner-checkbox" checked style="accent-color: var(--neon-green); width:18px; height:18px;">
+                            <label for="rules-banner-checkbox" style="margin:0; cursor:pointer;">إرفاق بنر سياسة المتجر الفخم (Rules Banner)</label>
+                        </div>
+
+                        <button id="btn-send-rules" class="btn-primary">
+                            <span>📜 نشر القوانين إلى الديسكورد فوراً</span>
+                        </button>
+                    </div>
+
+                    <!-- Rules Live Preview -->
+                    <div class="panel-card preview-card">
+                        <h2 class="card-title">👁️ معاينة حية لرسالة القوانين في الديسكورد</h2>
+                        <div class="discord-preview-box">
+                            <div class="discord-message">
+                                <img src="/static/img/logo_circle.png" class="discord-avatar" onerror="this.src='/static/img/logo.png'">
+                                <div class="discord-content">
+                                    <div class="discord-header">
+                                        <span class="bot-name">FET Store</span>
+                                        <span class="bot-badge">APP</span>
+                                        <span class="timestamp">Today at 10:00 PM</span>
+                                    </div>
+                                    
+                                    <div class="discord-embed" id="preview-rules-embed" style="border-left-color: #00ff41;">
+                                        <div class="embed-author">
+                                            <img src="/static/img/logo_circle.png" class="author-icon" onerror="this.src='/static/img/logo.png'">
+                                            <span>FET STORE | Official Guidelines</span>
+                                        </div>
+
+                                        <div class="embed-body-flex">
+                                            <div class="embed-text-col">
+                                                <h3 class="embed-title" id="preview-rules-title">FET STORE سياسة</h3>
+                                                <div class="embed-desc" id="preview-rules-desc">
+                                                    نرجو من جميع الأعضاء والعملاء الكرام الالتزام بالتعليمات التالية لضمان أفضل تجربة:<br><br>
+                                                    🔹 1. شرائك من متجرنا موافقة على جميع الاحكام والشروط لدى سياستنا.<br>
+                                                    🔹 2. كتصنيف للمنتجات الرقمية لدينا فهي غير قابلة للاسترداد او الاسترجاع.<br>
+                                                    🔹 3. يمنع فتح التكت بدون سبب أو تكرار المنشن للإدارة.<br>
+                                                    🔹 4. نحمل عدة طرق بيع يمكن الشراء من خلالها ثم استلام منتجك.<br>
+                                                    🔹 5. بعد اتمام الدفع يصلك المنتج في الكي ماستر ويمكنك تنزيله.<br>
+                                                    🔹 6. لسنا مسؤولين عن فقدان او تلف معلومات المنتج بعد تسليمها.<br><br>
+                                                    + هام<br>
+                                                    لايسمح لاي عميل بيع او اعادة توزيع او فك شفرات المنتج وبيعه وهذا يعد عمل لايسمح به عند الله وداخل المجتمع القانوني
+                                                </div>
+                                            </div>
+                                            <img src="/static/img/logo_circle.png" class="embed-thumbnail" onerror="this.src='/static/img/logo.png'" style="border-radius:50%; width:70px; height:70px;">
+                                        </div>
+
+                                        <!-- Bottom Banner -->
+                                        <div class="embed-banner-container" id="preview-rules-banner-container">
+                                            <img src="/static/img/rules_banner.png" class="embed-banner" onerror="this.src='/static/img/ticket_banner.png'">
+                                        </div>
+
+                                        <div class="embed-footer">
+                                            <img src="/static/img/logo_circle.png" class="footer-icon" onerror="this.src='/static/img/logo.png'">
+                                            <span>FET STORE | نرجو من الجميع الالتزام بالقوانين</span>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Tab 4: Settings -->
             <section class="tab-pane" id="settings-tab">
                 <div class="panel-card" style="max-width: 650px; margin: 0 auto;">
                     <h2 class="card-title">⚙️ إعدادات ربط البوت</h2>
@@ -252,7 +356,7 @@
                     <div class="form-group">
                         <label>📁 كاتجوري التكتات الفعالة (Active Category):</label>
                         <select id="ticket-category-select" class="form-input">
-                            <option value="">-- اختر قسم التكتات الفعالة (تكتات فعالة) --</option>
+                            <option value="">-- اختر قسم التكتات الفعالة --</option>
                         </select>
                         <input type="text" id="category-id-manual" class="form-input mt-2" placeholder="أو اكتب Active Category ID يدوياً">
                     </div>
@@ -260,7 +364,7 @@
                     <div class="form-group">
                         <label>📁 كاتجوري التكتات المغلقة (Closed Category):</label>
                         <select id="closed-category-select" class="form-input">
-                            <option value="">-- اختر قسم التكتات المغلقة (تكتات مغلقة) --</option>
+                            <option value="">-- اختر قسم التكتات المغلقة --</option>
                         </select>
                         <input type="text" id="closed-category-id-manual" class="form-input mt-2" placeholder="أو اكتب Closed Category ID يدوياً">
                     </div>

@@ -2,12 +2,10 @@
 let currentConfig = {};
 let botData = {};
 
-// Elements
-const botStatusDot = document.querySelector('.status-dot');
-const botStatusText = document.getElementById('bot-status-text');
-const botProfileCard = document.getElementById('bot-profile-card');
-const botUsername = document.getElementById('bot-username');
-const botAvatar = document.getElementById('bot-avatar');
+// Safe Element Helper
+function safeElem(id) {
+    return document.getElementById(id);
+}
 
 // Navigation Tabs
 document.querySelectorAll('.nav-btn').forEach(btn => {
@@ -16,51 +14,99 @@ document.querySelectorAll('.nav-btn').forEach(btn => {
         document.querySelectorAll('.tab-pane').forEach(p => p.classList.remove('active'));
         btn.classList.add('active');
         const tabId = btn.dataset.tab;
-        document.getElementById(tabId).classList.add('active');
+        const targetPane = document.getElementById(tabId);
+        if (targetPane) targetPane.classList.add('active');
     });
 });
 
 // [[ Live Preview Sync - Ticket Panel ]] //
-const ticketTitleInput = document.getElementById('ticket-title-input');
-const ticketDescInput = document.getElementById('ticket-desc-input');
-const ticketPlaceholderInput = document.getElementById('ticket-placeholder-input');
-const ticketColorInput = document.getElementById('ticket-color-input');
+const ticketTitleInput = safeElem('ticket-title-input');
+const ticketDescInput = safeElem('ticket-desc-input');
+const ticketPlaceholderInput = safeElem('ticket-placeholder-input');
+const ticketColorInput = safeElem('ticket-color-input');
 
-const previewTitle = document.getElementById('preview-title');
-const previewDesc = document.getElementById('preview-desc');
-const previewSelectPlaceholder = document.getElementById('preview-select-placeholder');
-const previewEmbed = document.getElementById('preview-embed');
+const previewTitle = safeElem('preview-title');
+const previewDesc = safeElem('preview-desc');
+const previewSelectPlaceholder = safeElem('preview-select-placeholder');
+const previewEmbed = safeElem('preview-embed');
 
-ticketTitleInput.addEventListener('input', (e) => {
-    previewTitle.innerText = e.target.value || 'FET STORE - Support & Ticket System';
-});
+if (ticketTitleInput && previewTitle) {
+    ticketTitleInput.addEventListener('input', (e) => {
+        previewTitle.innerText = e.target.value || 'FET STORE - Support & Ticket System';
+    });
+}
 
-ticketDescInput.addEventListener('input', (e) => {
-    previewDesc.innerHTML = (e.target.value || '').replace(/\n/g, '<br>');
-});
+if (ticketDescInput && previewDesc) {
+    ticketDescInput.addEventListener('input', (e) => {
+        previewDesc.innerHTML = (e.target.value || '').replace(/\n/g, '<br>');
+    });
+}
 
-ticketPlaceholderInput.addEventListener('input', (e) => {
-    previewSelectPlaceholder.innerText = e.target.value || '📂 - اختر نوع الخدمة المطلوبة';
-});
+if (ticketPlaceholderInput && previewSelectPlaceholder) {
+    ticketPlaceholderInput.addEventListener('input', (e) => {
+        previewSelectPlaceholder.innerText = e.target.value || '📂 - اختر نوع الخدمة المطلوبة';
+    });
+}
 
-ticketColorInput.addEventListener('input', (e) => {
-    previewEmbed.style.borderLeftColor = e.target.value;
-});
+if (ticketColorInput && previewEmbed) {
+    ticketColorInput.addEventListener('input', (e) => {
+        previewEmbed.style.borderLeftColor = e.target.value;
+    });
+}
 
 // [[ Live Preview Sync - Updates Broadcaster ]] //
-const updateProductInput = document.getElementById('update-product-input');
-const updateDescInput = document.getElementById('update-desc-input');
-const previewUpdateTitle = document.getElementById('preview-update-title');
-const previewUpdateDesc = document.getElementById('preview-update-desc');
+const updateProductInput = safeElem('update-product-input');
+const updateDescInput = safeElem('update-desc-input');
+const previewUpdateTitle = safeElem('preview-update-title');
+const previewUpdateDesc = safeElem('preview-update-desc');
 
-updateProductInput.addEventListener('input', (e) => {
-    const val = e.target.value.trim();
-    previewUpdateTitle.innerText = val ? `🚀 تم تحديث المنتج: ${val}` : '🚀 تم تحديث المنتج: FET INVENTORY V1.0';
-});
+if (updateProductInput && previewUpdateTitle) {
+    updateProductInput.addEventListener('input', (e) => {
+        const val = e.target.value.trim();
+        previewUpdateTitle.innerText = val ? `🚀 تم تحديث المنتج: ${val}` : '🚀 تم تحديث المنتج: FET INVENTORY V1.0';
+    });
+}
 
-updateDescInput.addEventListener('input', (e) => {
-    previewUpdateDesc.innerHTML = (e.target.value || '').replace(/\n/g, '<br>');
-});
+if (updateDescInput && previewUpdateDesc) {
+    updateDescInput.addEventListener('input', (e) => {
+        previewUpdateDesc.innerHTML = (e.target.value || '').replace(/\n/g, '<br>');
+    });
+}
+
+// [[ Live Preview Sync - Rules Broadcaster ]] //
+const rulesTitleInput = safeElem('rules-title-input');
+const rulesSubtitleInput = safeElem('rules-subtitle-input');
+const rulesTextInput = safeElem('rules-text-input');
+const rulesColorInput = safeElem('rules-color-input');
+const rulesBannerCheckbox = safeElem('rules-banner-checkbox');
+
+const previewRulesTitle = safeElem('preview-rules-title');
+const previewRulesDesc = safeElem('preview-rules-desc');
+const previewRulesEmbed = safeElem('preview-rules-embed');
+const previewRulesBannerContainer = safeElem('preview-rules-banner-container');
+
+function updateRulesPreview() {
+    if (previewRulesTitle && rulesTitleInput) {
+        previewRulesTitle.innerText = rulesTitleInput.value || '📜 قوانين وشروط متجر FET STORE الرسمية';
+    }
+    if (previewRulesDesc && rulesTextInput) {
+        const sub = rulesSubtitleInput ? rulesSubtitleInput.value.trim() : '';
+        const rules = (rulesTextInput.value || '').replace(/\n/g, '<br>');
+        previewRulesDesc.innerHTML = sub ? `${sub}<br><br>${rules}` : rules;
+    }
+    if (previewRulesEmbed && rulesColorInput) {
+        previewRulesEmbed.style.borderLeftColor = rulesColorInput.value;
+    }
+    if (previewRulesBannerContainer && rulesBannerCheckbox) {
+        previewRulesBannerContainer.style.display = rulesBannerCheckbox.checked ? 'block' : 'none';
+    }
+}
+
+if (rulesTitleInput) rulesTitleInput.addEventListener('input', updateRulesPreview);
+if (rulesSubtitleInput) rulesSubtitleInput.addEventListener('input', updateRulesPreview);
+if (rulesTextInput) rulesTextInput.addEventListener('input', updateRulesPreview);
+if (rulesColorInput) rulesColorInput.addEventListener('input', updateRulesPreview);
+if (rulesBannerCheckbox) rulesBannerCheckbox.addEventListener('change', updateRulesPreview);
 
 // [[ API - Fetch Bot Status & Channels ]] //
 async function loadStatus() {
@@ -70,34 +116,39 @@ async function loadStatus() {
         botData = data;
         currentConfig = data.config || {};
 
+        const botStatusDot = document.querySelector('.status-dot');
+        const botStatusText = safeElem('bot-status-text');
+        const botProfileCard = safeElem('bot-profile-card');
+        const botUsername = safeElem('bot-username');
+        const botAvatar = safeElem('bot-avatar');
+
         if (data.online) {
-            botStatusDot.className = 'status-dot online';
-            botStatusText.innerText = 'البوت متصل بنجاح 🟢';
-            botProfileCard.classList.remove('hidden');
-            botUsername.innerText = data.bot_user;
-            if (data.bot_avatar) botAvatar.src = data.bot_avatar;
+            if (botStatusDot) botStatusDot.className = 'status-dot online';
+            if (botStatusText) botStatusText.innerText = 'البوت متصل بنجاح 🟢';
+            if (botProfileCard) botProfileCard.classList.remove('hidden');
+            if (botUsername && data.bot_user) botUsername.innerText = data.bot_user;
+            if (botAvatar && data.bot_avatar) botAvatar.src = data.bot_avatar;
         } else {
-            botStatusDot.className = 'status-dot offline';
-            botStatusText.innerText = 'البوت غير متصل 🔴 (يرجى إدخال التوكن)';
-            botProfileCard.classList.add('hidden');
+            if (botStatusDot) botStatusDot.className = 'status-dot offline';
+            if (botStatusText) botStatusText.innerText = data.bot_error ? `خطأ: ${data.bot_error}` : 'البوت غير متصل 🔴 (يرجى إدخال التوكن)';
+            if (botProfileCard) botProfileCard.classList.add('hidden');
         }
 
         // Fill channels & roles dropdowns
-        populateDropdowns(data.guilds || []);
+        if (data.guilds && Array.isArray(data.guilds)) {
+            populateDropdowns(data.guilds);
+        }
         
         // Fill initial inputs with config
-        if (currentConfig.token) {
-            document.getElementById('token-input').value = currentConfig.token;
-        }
-        if (currentConfig.staff_role_id) {
-            document.getElementById('staff-role-id-manual').value = currentConfig.staff_role_id;
-        }
-        if (currentConfig.ticket_category_id) {
-            document.getElementById('category-id-manual').value = currentConfig.ticket_category_id;
-        }
-        if (currentConfig.closed_category_id) {
-            document.getElementById('closed-category-id-manual').value = currentConfig.closed_category_id;
-        }
+        const tokenInp = safeElem('token-input');
+        const staffInp = safeElem('staff-role-id-manual');
+        const catInp = safeElem('category-id-manual');
+        const closedCatInp = safeElem('closed-category-id-manual');
+
+        if (tokenInp && currentConfig.token) tokenInp.value = currentConfig.token;
+        if (staffInp && currentConfig.staff_role_id) staffInp.value = currentConfig.staff_role_id;
+        if (catInp && currentConfig.ticket_category_id) catInp.value = currentConfig.ticket_category_id;
+        if (closedCatInp && currentConfig.closed_category_id) closedCatInp.value = currentConfig.closed_category_id;
 
     } catch (e) {
         console.error('Error fetching status:', e);
@@ -105,175 +156,250 @@ async function loadStatus() {
 }
 
 function populateDropdowns(guilds) {
-    const ticketChannelSelect = document.getElementById('ticket-channel-select');
-    const updateChannelSelect = document.getElementById('update-channel-select');
-    const staffRoleSelect = document.getElementById('staff-role-select');
-    const categorySelect = document.getElementById('ticket-category-select');
-    const closedCategorySelect = document.getElementById('closed-category-select');
+    const ticketChannelSelect = safeElem('ticket-channel-select');
+    const updateChannelSelect = safeElem('update-channel-select');
+    const rulesChannelSelect = safeElem('rules-channel-select');
+    const staffRoleSelect = safeElem('staff-role-select');
+    const categorySelect = safeElem('ticket-category-select');
+    const closedCategorySelect = safeElem('closed-category-select');
 
-    ticketChannelSelect.innerHTML = '<option value="">-- اختر الروم من سيرفرك --</option>';
-    updateChannelSelect.innerHTML = '<option value="">-- اختر الروم --</option>';
-    staffRoleSelect.innerHTML = '<option value="">-- اختر الرتبة التي تستقبل التكتات --</option>';
-    categorySelect.innerHTML = '<option value="">-- اختر قسم التكتات الفعالة (تكتات فعالة) --</option>';
-    if (closedCategorySelect) {
-        closedCategorySelect.innerHTML = '<option value="">-- اختر قسم التكتات المغلقة (تكتات مغلقة) --</option>';
-    }
+    if (ticketChannelSelect) ticketChannelSelect.innerHTML = '<option value="">-- اختر الروم من سيرفرك --</option>';
+    if (updateChannelSelect) updateChannelSelect.innerHTML = '<option value="">-- اختر الروم --</option>';
+    if (rulesChannelSelect) rulesChannelSelect.innerHTML = '<option value="">-- اختر الروم --</option>';
+    if (staffRoleSelect) staffRoleSelect.innerHTML = '<option value="">-- اختر الرتبة التي تستقبل التكتات --</option>';
+    if (categorySelect) categorySelect.innerHTML = '<option value="">-- اختر قسم التكتات الفعالة --</option>';
+    if (closedCategorySelect) closedCategorySelect.innerHTML = '<option value="">-- اختر قسم التكتات المغلقة --</option>';
 
     guilds.forEach(g => {
         // Text Channels
         if (g.channels) {
             g.channels.forEach(ch => {
-                const opt1 = new Option(`# ${ch.name} (${g.name})`, ch.id);
-                const opt2 = new Option(`# ${ch.name} (${g.name})`, ch.id);
-                ticketChannelSelect.add(opt1);
-                updateChannelSelect.add(opt2);
+                if (ticketChannelSelect) ticketChannelSelect.add(new Option(`# ${ch.name} (${g.name})`, ch.id));
+                if (updateChannelSelect) updateChannelSelect.add(new Option(`# ${ch.name} (${g.name})`, ch.id));
+                if (rulesChannelSelect) rulesChannelSelect.add(new Option(`# ${ch.name} (${g.name})`, ch.id));
             });
         }
         // Roles
         if (g.roles) {
             g.roles.forEach(r => {
-                const opt = new Option(`@${r.name}`, r.id);
-                staffRoleSelect.add(opt);
+                if (staffRoleSelect) staffRoleSelect.add(new Option(`@${r.name}`, r.id));
             });
         }
         // Categories
         if (g.categories) {
             g.categories.forEach(cat => {
-                const opt1 = new Option(`📁 ${cat.name}`, cat.id);
-                const opt2 = new Option(`📁 ${cat.name}`, cat.id);
-                categorySelect.add(opt1);
-                if (closedCategorySelect) closedCategorySelect.add(opt2);
+                if (categorySelect) categorySelect.add(new Option(`📁 ${cat.name}`, cat.id));
+                if (closedCategorySelect) closedCategorySelect.add(new Option(`📁 ${cat.name}`, cat.id));
             });
+        }
+    });
+
+    if (ticketChannelSelect && currentConfig.ticket_channel_id) ticketChannelSelect.value = currentConfig.ticket_channel_id;
+    if (updateChannelSelect && currentConfig.updates_channel_id) updateChannelSelect.value = currentConfig.updates_channel_id;
+    if (staffRoleSelect && currentConfig.staff_role_id) staffRoleSelect.value = currentConfig.staff_role_id;
+    if (categorySelect && currentConfig.ticket_category_id) categorySelect.value = currentConfig.ticket_category_id;
+    if (closedCategorySelect && currentConfig.closed_category_id) closedCategorySelect.value = currentConfig.closed_category_id;
+}
+
+// [[ Send Ticket Panel to Discord ]] //
+const btnSendTicket = safeElem('btn-send-ticket');
+if (btnSendTicket) {
+    btnSendTicket.addEventListener('click', async () => {
+        const ticketChannelSelect = safeElem('ticket-channel-select');
+        const channelId = ticketChannelSelect ? ticketChannelSelect.value : '';
+        if (!channelId) {
+            return showToast('⚠️ يرجى اختيار الروم أولاً!');
+        }
+
+        const payload = {
+            channel_id: channelId,
+            title: ticketTitleInput ? ticketTitleInput.value : 'FET STORE - Support & Ticket System',
+            description: ticketDescInput ? ticketDescInput.value : '',
+            placeholder: ticketPlaceholderInput ? ticketPlaceholderInput.value : '📂 - اختر نوع الخدمة المطلوبة',
+            color: ticketColorInput ? ticketColorInput.value : '#00ff41'
+        };
+
+        try {
+            showToast('⏳ جاري إرسال التكت إلى الديسكورد...');
+            const res = await fetch('/api/ticket/send', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(payload)
+            });
+            const result = await res.json();
+            if (result.status === 'ok') {
+                showToast('✅ تم إرسال رسالة التكت بنجاح إلى الديسكورد!');
+            } else {
+                showToast('❌ خطأ: ' + result.message);
+            }
+        } catch (e) {
+            showToast('❌ تعذر الإرسال: ' + e.message);
         }
     });
 }
 
-// [[ Send Ticket Panel to Discord ]] //
-document.getElementById('btn-send-ticket').addEventListener('click', async () => {
-    const channelId = document.getElementById('ticket-channel-select').value;
-    if (!channelId) {
-        return showToast('⚠️ يرجى اختيار الروم أولاً!');
-    }
-
-    const payload = {
-        channel_id: channelId,
-        title: ticketTitleInput.value,
-        description: ticketDescInput.value,
-        placeholder: ticketPlaceholderInput.value,
-        color: ticketColorInput.value
-    };
-
-    try {
-        showToast('⏳ جاري إرسال التكت إلى الديسكورد...');
-        const res = await fetch('/api/ticket/send', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(payload)
-        });
-        const result = await res.json();
-        if (result.status === 'ok') {
-            showToast('✅ تم إرسال رسالة التكت بنجاح إلى الديسكورد!');
-        } else {
-            showToast('❌ خطأ: ' + result.message);
-        }
-    } catch (e) {
-        showToast('❌ تعذر الإرسال: ' + e.message);
-    }
-});
-
 // [[ Publish Product Update to Discord ]] //
-document.getElementById('btn-send-update').addEventListener('click', async () => {
-    const channelId = document.getElementById('update-channel-select').value;
-    const productName = updateProductInput.value.trim();
-    const content = updateDescInput.value.trim();
-    const imageUrl = document.getElementById('update-image-input').value.trim();
+const btnSendUpdate = safeElem('btn-send-update');
+if (btnSendUpdate) {
+    btnSendUpdate.addEventListener('click', async () => {
+        const updateChannelSelect = safeElem('update-channel-select');
+        const channelId = updateChannelSelect ? updateChannelSelect.value : '';
+        const productName = updateProductInput ? updateProductInput.value.trim() : '';
+        const content = updateDescInput ? updateDescInput.value.trim() : '';
+        const imageInp = safeElem('update-image-input');
+        const imageUrl = imageInp ? imageInp.value.trim() : '';
 
-    if (!channelId || !productName || !content) {
-        return showToast('⚠️ يرجى اختيار الروم وكتابة اسم المنتج وتفاصيل التحديث!');
-    }
-
-    const payload = {
-        channel_id: channelId,
-        product_name: productName,
-        content: content,
-        image_url: imageUrl
-    };
-
-    try {
-        showToast('⏳ جاري نشر التحديث في الديسكورد...');
-        const res = await fetch('/api/update/send', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(payload)
-        });
-        const result = await res.json();
-        if (result.status === 'ok') {
-            showToast('✅ تم نشر التحديث بنجاح مع لوقو المتجر!');
-            updateProductInput.value = '';
-            updateDescInput.value = '';
-        } else {
-            showToast('❌ خطأ: ' + result.message);
+        if (!channelId || !productName || !content) {
+            return showToast('⚠️ يرجى اختيار الروم وكتابة اسم المنتج وتفاصيل التحديث!');
         }
-    } catch (e) {
-        showToast('❌ تعذر النشر: ' + e.message);
-    }
-});
+
+        const payload = {
+            channel_id: channelId,
+            product_name: productName,
+            content: content,
+            image_url: imageUrl
+        };
+
+        try {
+            showToast('⏳ جاري نشر التحديث في الديسكورد...');
+            const res = await fetch('/api/update/send', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(payload)
+            });
+            const result = await res.json();
+            if (result.status === 'ok') {
+                showToast('✅ تم نشر التحديث بنجاح مع لوقو المتجر!');
+                if (updateProductInput) updateProductInput.value = '';
+                if (updateDescInput) updateDescInput.value = '';
+            } else {
+                showToast('❌ خطأ: ' + result.message);
+            }
+        } catch (e) {
+            showToast('❌ تعذر النشر: ' + e.message);
+        }
+    });
+}
+
+// [[ Publish Rules to Discord ]] //
+const btnSendRules = safeElem('btn-send-rules');
+if (btnSendRules) {
+    btnSendRules.addEventListener('click', async () => {
+        const rulesSelect = safeElem('rules-channel-select');
+        const channelId = rulesSelect ? rulesSelect.value : '';
+        const title = rulesTitleInput ? rulesTitleInput.value.trim() : '';
+        const subtitle = rulesSubtitleInput ? rulesSubtitleInput.value.trim() : '';
+        const rulesText = rulesTextInput ? rulesTextInput.value.trim() : '';
+        const color = rulesColorInput ? rulesColorInput.value : '#00ff41';
+        const includeBanner = rulesBannerCheckbox ? rulesBannerCheckbox.checked : true;
+
+        if (!channelId || !rulesText) {
+            return showToast('⚠️ يرجى اختيار الروم وكتابة بنود القوانين!');
+        }
+
+        const payload = {
+            channel_id: channelId,
+            title: title,
+            subtitle: subtitle,
+            rules_text: rulesText,
+            color: color,
+            include_banner: includeBanner
+        };
+
+        try {
+            showToast('⏳ جاري نشر القوانين في الديسكورد...');
+            const res = await fetch('/api/rules/send', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(payload)
+            });
+            const result = await res.json();
+            if (result.status === 'ok') {
+                showToast('✅ تم نشر القوانين بنجاح بتصميم مودرن وفخم!');
+            } else {
+                showToast('❌ خطأ: ' + result.message);
+            }
+        } catch (e) {
+            showToast('❌ تعذر النشر: ' + e.message);
+        }
+    });
+}
 
 // [[ Save Settings ]] //
-document.getElementById('btn-save-settings').addEventListener('click', async () => {
-    const token = document.getElementById('token-input').value.trim();
-    const staffRole = document.getElementById('staff-role-select').value || document.getElementById('staff-role-id-manual').value.trim();
-    const category = document.getElementById('ticket-category-select').value || document.getElementById('category-id-manual').value.trim();
-    const closedCategory = (document.getElementById('closed-category-select') ? document.getElementById('closed-category-select').value : '') || document.getElementById('closed-category-id-manual').value.trim();
+const btnSaveSettings = safeElem('btn-save-settings');
+if (btnSaveSettings) {
+    btnSaveSettings.addEventListener('click', async () => {
+        const tokenInp = safeElem('token-input');
+        const staffSelect = safeElem('staff-role-select');
+        const staffManual = safeElem('staff-role-id-manual');
+        const catSelect = safeElem('ticket-category-select');
+        const catManual = safeElem('category-id-manual');
+        const closedSelect = safeElem('closed-category-select');
+        const closedManual = safeElem('closed-category-id-manual');
 
-    const payload = {
-        token: token,
-        staff_role_id: staffRole,
-        ticket_category_id: category,
-        closed_category_id: closedCategory
-    };
+        const token = tokenInp ? tokenInp.value.trim() : '';
+        const staffRole = (staffSelect && staffSelect.value) || (staffManual ? staffManual.value.trim() : '');
+        const category = (catSelect && catSelect.value) || (catManual ? catManual.value.trim() : '');
+        const closedCategory = (closedSelect && closedSelect.value) || (closedManual ? closedManual.value.trim() : '');
 
-    try {
-        showToast('💾 جاري حفظ الإعدادات...');
-        const res = await fetch('/api/config/save', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(payload)
-        });
-        const result = await res.json();
-        if (result.status === 'ok') {
-            showToast('✅ تم حفظ الإعدادات بنجاح! يتم الآن ربط البوت...');
-            setTimeout(loadStatus, 2000);
+        const payload = {
+            token: token,
+            staff_role_id: staffRole,
+            ticket_category_id: category,
+            closed_category_id: closedCategory
+        };
+
+        try {
+            showToast('💾 جاري حفظ الإعدادات...');
+            const res = await fetch('/api/config/save', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(payload)
+            });
+            const result = await res.json();
+            if (result.status === 'ok') {
+                showToast('✅ تم حفظ الإعدادات بنجاح! يتم الآن ربط البوت...');
+                setTimeout(loadStatus, 2000);
+            }
+        } catch (e) {
+            showToast('❌ خطأ في الحفظ: ' + e.message);
         }
-    } catch (e) {
-        showToast('❌ خطأ في الحفظ: ' + e.message);
-    }
-});
+    });
+}
 
 // Toggle Token Visibility
-const toggleTokenBtn = document.getElementById('toggle-token-btn');
-const tokenInput = document.getElementById('token-input');
-toggleTokenBtn.addEventListener('click', () => {
-    if (tokenInput.type === 'password') {
-        tokenInput.type = 'text';
-        toggleTokenBtn.innerText = 'إخفاء';
-    } else {
-        tokenInput.type = 'password';
-        toggleTokenBtn.innerText = 'إظهار';
-    }
-});
+const toggleTokenBtn = safeElem('toggle-token-btn');
+const tokenInput = safeElem('token-input');
+if (toggleTokenBtn && tokenInput) {
+    toggleTokenBtn.addEventListener('click', () => {
+        if (tokenInput.type === 'password') {
+            tokenInput.type = 'text';
+            toggleTokenBtn.innerText = 'إخفاء';
+        } else {
+            tokenInput.type = 'password';
+            toggleTokenBtn.innerText = 'إظهار';
+        }
+    });
+}
 
 // Toast Utility
 function showToast(msg) {
-    const toast = document.getElementById('toast');
-    const toastMsg = document.getElementById('toast-msg');
-    toastMsg.innerText = msg;
-    toast.classList.remove('hidden');
-    setTimeout(() => {
-        toast.classList.add('hidden');
-    }, 4000);
+    const toast = safeElem('toast');
+    const toastMsg = safeElem('toast-msg');
+    if (toast && toastMsg) {
+        toastMsg.innerText = msg;
+        toast.classList.remove('hidden');
+        setTimeout(() => {
+            toast.classList.add('hidden');
+        }, 4000);
+    }
 }
 
 // Initial Load & Auto Poll
-loadStatus();
-setInterval(loadStatus, 5000);
+document.addEventListener('DOMContentLoaded', () => {
+    loadStatus();
+    setInterval(loadStatus, 5000);
+});
+if (document.readyState === 'complete' || document.readyState === 'interactive') {
+    loadStatus();
+}

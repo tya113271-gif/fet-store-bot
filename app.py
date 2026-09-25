@@ -80,6 +80,30 @@ DEFAULT_ADMIN_USERS = [
 
 DEFAULT_REVIEWS_CHANNEL_ID = "1541905587150004344"
 
+DEFAULT_SECURITY_CONFIG = {
+    "enabled": True,
+    "anti_nuke": True,
+    "anti_channel_rename": True,
+    "anti_channel_delete": True,
+    "anti_channel_create": True,
+    "anti_role_delete": True,
+    "anti_role_edit": True,
+    "anti_mass_ban": True,
+    "anti_mass_kick": True,
+    "anti_bot": True,
+    "anti_invites": True,
+    "anti_links": False,
+    "anti_spam": True,
+    "anti_mass_mention": True,
+    "nuke_threshold": 2,
+    "nuke_window_seconds": 10,
+    "nuke_action": "ban",
+    "log_channel_id": "",
+    "whitelist_roles": [],
+    "whitelist_users": []
+}
+
+
 def load_config():
     cfg = {}
     if os.path.exists(CONFIG_PATH):
@@ -110,6 +134,20 @@ def load_config():
                     f.write(base64.b64decode(custom_b64))
             except Exception as e:
                 logger.error(f"Error restoring custom ticket banner: {e}")
+
+    cfg.setdefault("security", DEFAULT_SECURITY_CONFIG.copy())
+    for sk, sv in DEFAULT_SECURITY_CONFIG.items():
+        cfg["security"].setdefault(sk, sv)
+
+    custom_rules_b64 = cfg.get("custom_rules_banner_b64")
+    if custom_rules_b64:
+        custom_rules_path = os.path.join(ASSETS_DIR, "custom_rules_banner.png")
+        if not os.path.exists(custom_rules_path):
+            try:
+                with open(custom_rules_path, "wb") as f:
+                    f.write(base64.b64decode(custom_rules_b64))
+            except Exception as e:
+                logger.error(f"Error restoring custom rules banner: {e}")
 
     return cfg
 
@@ -849,11 +887,259 @@ class TicketPanelView(discord.ui.View):
 
 def setup_bot_handlers(b):
     invites_cache = {}
+    nuke_tracker = {}
+    spam_tracker = {}
+
+    def is_whitelisted(user, guild):
+        if not user or not guild:
+            return True
+        if user.id == guild.owner_id:
+            return True
+        if b.user and user.id == b.user.id:
+            return True
+        cfg = load_config()
+        sec = cfg.get("security", {})
+        if not sec.get("enabled", True):
+            return True
+        u_str = str(user.id)
+        wl_users = [str(x) for x in sec.get("whitelist_users", [])]
+        if u_str in wl_users:
+            return True
+        if hasattr(user, "roles"):
+            wl_roles = [str(x) for x in sec.get("whitelist_roles", [])]
+            for r in user.roles:
+                if str(r.id) in wl_roles:
+                    return True
+        return False
+
+    async def send_sec_log(guild, title, desc, culprit=None, color_hex="#ff0033", fields=None):
+        try:
+            cfg = load_config()
+            sec = cfg.get("security", {})
+            log_chan_id = sec.get("log_channel_id")
+            target_channel = None
+            if log_chan_id:
+                try:
+                    target_channel = guild.get_channel(int(log_chan_id))
+                except:
+                    target_channel = None
+
+            if not target_channel:
+                for c in guild.text_channels:
+                    cname = c.name.lower()
+                    if any(k in cname for k in ["سجل", "حماي", "security", "anti-nuke", "logs", "log"]):
+                        target_channel = c
+                        break
+
+            embed = discord.Embed(
+                title=f"🛡️ FET SECURITY ALERT | {title}",
+                description=desc,
+                color=discord.Color.from_str(color_hex),
+                timestamp=datetime.datetime.now(datetime.timezone.utc)
+            )
+            if culprit:
+                avatar_url = culprit.avatar.url if (hasattr(culprit, "avatar") and culprit.avatar) else None
+                if avatar_url:
+                    embed.set_thumbnail(url=str(avatar_url))
+                embed.add_field(name="👤 الفاعل المشبوه", value=f"{culprit.mention} (`{culprit.name}` | ID: `{culprit.id}`)", inline=False)
+
+            if fields:
+                for k, v in fields.items():
+                    embed.add_field(name=k, value=v, inline=True)
+
+            embed.set_footer(text="FET STORE ANTI-NUKE SYSTEM | حماية السيرفر القصوى 24/7")
+
+            if target_channel:
+                await target_channel.send(content="@here 🚨 تنبيه أمني عاجل!", embed=embed)
+            elif guild.owner:
+                try:
+                    await guild.owner.send(embed=embed)
+                except:
+                    pass
+        except Exception as e:
+            logger.warning(f"Error in send_sec_log: {e}")
+
+    async def execute_nuke_defense(guild, culprit, violation_type, details=""):
+        try:
+            cfg = load_config()
+            sec = cfg.get("security", {})
+            action = sec.get("nuke_action", "ban")
+
+            # 1. Strip dangerous permissions immediately
+            try:
+                dangerous_perms = ["administrator", "manage_guild", "manage_channels", "manage_roles", "ban_members", "kick_members", "manage_webhooks"]
+                if hasattr(culprit, "roles"):
+                    to_remove = [r for r in culprit.roles if r.name != "@everyone" and any(getattr(r.permissions, p, False) for p in dangerous_perms)]
+                    if to_remove:
+                        await culprit.remove_roles(*to_remove, reason=f"FET ANTI-NUKE STRIP: {violation_type}")
+                        logger.info(f"Stripped {len(to_remove)} dangerous roles from {culprit.name}")
+            except Exception as se:
+                logger.warning(f"Error stripping roles from {culprit}: {se}")
+
+            # 2. Punish
+            punish_msg = ""
+            if action == "ban":
+                try:
+                    await guild.ban(culprit, reason=f"FET ANTI-NUKE SYSTEM: {violation_type} ({details})", delete_message_days=1)
+                    punish_msg = "⛔ **تم إعطاء باند نهائي وطرده من السيرفر فوراً!**"
+                except Exception as be:
+                    punish_msg = f"⚠️ تعذر التبنيد (رتبة الفاعل أعلى من البوت): {be}"
+            elif action == "kick":
+                try:
+                    await guild.kick(culprit, reason=f"FET ANTI-NUKE SYSTEM: {violation_type} ({details})")
+                    punish_msg = "🚪 **تم طرد العضو من السيرفر فوراً!**"
+                except Exception as ke:
+                    punish_msg = f"⚠️ تعذر الطرد: {ke}"
+            else:
+                try:
+                    await culprit.timeout(datetime.timedelta(days=7), reason=f"FET ANTI-NUKE SYSTEM: {violation_type}")
+                    punish_msg = "⏳ **تم عزله ووضعه في تايم أوت لمدة 7 أيام!**"
+                except Exception as te:
+                    punish_msg = f"⚠️ تعذر إعطاء تايم أوت: {te}"
+
+            # 3. Log alert
+            await send_sec_log(
+                guild,
+                title=f"رصد محاولة تخريب سيرفر: {violation_type}",
+                desc=(
+                    f"🚨 **تم رصد محاولة تخريب / اختراق وتفعيل الردع الفوري!**\n\n"
+                    f"📌 **نوع المخالفة:** `{violation_type}`\n"
+                    f"📝 **التفاصيل:** {details}\n"
+                    f"⚖️ **الإجراء المتخذ:** {punish_msg}\n"
+                    f"🔒 **تجريد الرتب:** تم سحب كافة صلاحيات الإدارة والرتب الحساسة من حسابه."
+                ),
+                culprit=culprit,
+                color_hex="#ff0033"
+            )
+        except Exception as e:
+            logger.error(f"Error executing nuke defense: {e}")
 
     @b.event
     async def on_message(message: discord.Message):
         if message.author.bot or not message.guild:
             return
+
+        # [[ Anti-Nuke, Anti-Invite, Anti-Link & Chat Protection ]] #
+        if not is_whitelisted(message.author, message.guild):
+            sec = load_config().get("security", {})
+            if sec.get("enabled", True):
+                content = message.content or ""
+
+                # 1. Anti-Discord-Invites
+                if sec.get("anti_invites", True):
+                    inv_match = re.search(r"(https?://)?(www\.)?(discord\.(gg|io|me|li)|discordapp\.com/invite|discord\.com/invite)/[a-zA-Z0-9]+", content, re.IGNORECASE)
+                    if inv_match:
+                        try:
+                            await message.delete()
+                        except:
+                            pass
+                        try:
+                            await message.author.timeout(datetime.timedelta(minutes=30), reason="FET SECURITY: نشر إعلانات أو روابط دعوات ديسكورد")
+                        except Exception as te:
+                            logger.warning(f"Could not timeout user: {te}")
+
+                        try:
+                            w_msg = await message.channel.send(f"🚫 {message.author.mention} **يمنع نشر روابط سيرفرات الديسكورد والإعلانات هنا!** (تم حذف رسالتك وتطبيق تايم أوت 30 دقيقة)")
+                            asyncio.create_task(asyncio.sleep(6)).add_done_callback(lambda _: asyncio.run_coroutine_threadsafe(w_msg.delete(), b.loop))
+                        except:
+                            pass
+
+                        await send_sec_log(
+                            message.guild,
+                            title="حظر إعلان ديسكورد ممنوع (Discord Invite Blocked)",
+                            desc=f"🚫 **تم رصد وحذف إعلان ديسكورد مشبوه!**\n\n📍 **الروم:** {message.channel.mention}\n💬 **محتوى الرسالة:**\n```{content[:500]}```",
+                            culprit=message.author,
+                            color_hex="#ff8800"
+                        )
+                        return
+
+                # 2. Anti-External-Links
+                if sec.get("anti_links", False):
+                    link_match = re.search(r"https?://[^\s]+", content, re.IGNORECASE)
+                    if link_match:
+                        try:
+                            await message.delete()
+                        except:
+                            pass
+                        try:
+                            await message.author.timeout(datetime.timedelta(minutes=15), reason="FET SECURITY: نشر روابط خارجية ممنوعة")
+                        except:
+                            pass
+
+                        try:
+                            w_msg = await message.channel.send(f"⚠️ {message.author.mention} **يمنع نشر الروابط الخارجية في الشات!**")
+                            asyncio.create_task(asyncio.sleep(5)).add_done_callback(lambda _: asyncio.run_coroutine_threadsafe(w_msg.delete(), b.loop))
+                        except:
+                            pass
+
+                        await send_sec_log(
+                            message.guild,
+                            title="حظر رابط خارجي (External Link Blocked)",
+                            desc=f"📍 **الروم:** {message.channel.mention}\n💬 **الرابط:** `{link_match.group(0)}`",
+                            culprit=message.author,
+                            color_hex="#ff8800"
+                        )
+                        return
+
+                # 3. Anti-Mass-Mention
+                if sec.get("anti_mass_mention", True):
+                    if "@everyone" in content or "@here" in content:
+                        try:
+                            await message.delete()
+                        except:
+                            pass
+                        try:
+                            await message.author.timeout(datetime.timedelta(hours=1), reason="FET SECURITY: منشن جماعي غير مصرح")
+                        except:
+                            pass
+
+                        try:
+                            w_msg = await message.channel.send(f"🚨 {message.author.mention} **غير مصرح لك بعمل منشن جماعي! تم حذف الرسالة.**")
+                            asyncio.create_task(asyncio.sleep(5)).add_done_callback(lambda _: asyncio.run_coroutine_threadsafe(w_msg.delete(), b.loop))
+                        except:
+                            pass
+
+                        await send_sec_log(
+                            message.guild,
+                            title="محاولة منشن جماعي غير مصرح (Mass Mention Blocked)",
+                            desc=f"📍 **الروم:** {message.channel.mention}\n💬 **الرسالة:** `{content[:300]}`",
+                            culprit=message.author,
+                            color_hex="#ff2200"
+                        )
+                        return
+
+                # 4. Anti-Spam
+                if sec.get("anti_spam", True):
+                    now = datetime.datetime.now().timestamp()
+                    u_msgs = spam_tracker.setdefault(message.author.id, [])
+                    u_msgs = [t for t in u_msgs if now - t < 3]
+                    u_msgs.append(now)
+                    spam_tracker[message.author.id] = u_msgs
+
+                    if len(u_msgs) >= 5:
+                        try:
+                            await message.delete()
+                        except:
+                            pass
+                        try:
+                            await message.author.timeout(datetime.timedelta(minutes=10), reason="FET SECURITY: سبام سريع")
+                        except:
+                            pass
+
+                        try:
+                            w_msg = await message.channel.send(f"⚡ {message.author.mention} **يرجى التوقف عن السبام وتكرار الرسائل السريعة! (تايم أوت 10 دقائق)**")
+                            asyncio.create_task(asyncio.sleep(5)).add_done_callback(lambda _: asyncio.run_coroutine_threadsafe(w_msg.delete(), b.loop))
+                        except:
+                            pass
+
+                        await send_sec_log(
+                            message.guild,
+                            title="رصد سبام سريع (Anti-Spam Triggered)",
+                            desc=f"📍 **الروم:** {message.channel.mention}\n⚡ أرسل أكثر من 5 رسائل متتالية في أقل من 3 ثواني.",
+                            culprit=message.author,
+                            color_hex="#ffaa00"
+                        )
+                        return
 
         content_clean = message.content.strip()
 
@@ -940,6 +1226,173 @@ def setup_bot_handlers(b):
 
         await b.process_commands(message)
 
+
+    @b.event
+    async def on_guild_channel_update(before: discord.abc.GuildChannel, after: discord.abc.GuildChannel):
+        if before.name != after.name:
+            cfg = load_config()
+            sec = cfg.get("security", {})
+            if sec.get("enabled", True) and sec.get("anti_channel_rename", True):
+                try:
+                    async for entry in after.guild.audit_logs(limit=1, action=discord.AuditLogAction.channel_update):
+                        executor = entry.user
+                        if executor and not is_whitelisted(executor, after.guild):
+                            now = datetime.datetime.now().timestamp()
+                            t_list = nuke_tracker.setdefault(executor.id, {}).setdefault("channel_rename", [])
+                            t_list = [t for t in t_list if now - t < sec.get("nuke_window_seconds", 10)]
+                            t_list.append(now)
+                            nuke_tracker[executor.id]["channel_rename"] = t_list
+
+                            if len(t_list) >= sec.get("nuke_threshold", 2):
+                                try:
+                                    await after.edit(name=before.name, reason="FET ANTI-NUKE: استرجاع اسم الروم بعد محاولة تخريب")
+                                except:
+                                    pass
+                                await execute_nuke_defense(
+                                    after.guild,
+                                    executor,
+                                    "تغيير أسماء الرومات بشكل جماعي (Mass Channel Rename)",
+                                    f"قام بتغيير اسم روم `{before.name}` إلى `{after.name}` وتجاوز الحد المسموح!"
+                                )
+                        break
+                except Exception as e:
+                    logger.warning(f"Error in on_guild_channel_update security check: {e}")
+
+    @b.event
+    async def on_guild_channel_delete(channel: discord.abc.GuildChannel):
+        cfg = load_config()
+        sec = cfg.get("security", {})
+        if sec.get("enabled", True) and sec.get("anti_channel_delete", True):
+            try:
+                async for entry in channel.guild.audit_logs(limit=1, action=discord.AuditLogAction.channel_delete):
+                    executor = entry.user
+                    if executor and not is_whitelisted(executor, channel.guild):
+                        now = datetime.datetime.now().timestamp()
+                        t_list = nuke_tracker.setdefault(executor.id, {}).setdefault("channel_delete", [])
+                        t_list = [t for t in t_list if now - t < sec.get("nuke_window_seconds", 10)]
+                        t_list.append(now)
+                        nuke_tracker[executor.id]["channel_delete"] = t_list
+
+                        if len(t_list) >= sec.get("nuke_threshold", 2):
+                            await execute_nuke_defense(
+                                channel.guild,
+                                executor,
+                                "حذف الرومات بشكل جماعي (Mass Channel Delete)",
+                                f"قام بحذف روم `{channel.name}` وتجاوز الحد المسموح!"
+                            )
+                    break
+            except Exception as e:
+                logger.warning(f"Error in on_guild_channel_delete security check: {e}")
+
+    @b.event
+    async def on_guild_channel_create(channel: discord.abc.GuildChannel):
+        cfg = load_config()
+        sec = cfg.get("security", {})
+        if sec.get("enabled", True) and sec.get("anti_channel_create", True):
+            try:
+                async for entry in channel.guild.audit_logs(limit=1, action=discord.AuditLogAction.channel_create):
+                    executor = entry.user
+                    if executor and not is_whitelisted(executor, channel.guild):
+                        now = datetime.datetime.now().timestamp()
+                        t_list = nuke_tracker.setdefault(executor.id, {}).setdefault("channel_create", [])
+                        t_list = [t for t in t_list if now - t < sec.get("nuke_window_seconds", 10)]
+                        t_list.append(now)
+                        nuke_tracker[executor.id]["channel_create"] = t_list
+
+                        if len(t_list) >= sec.get("nuke_threshold", 2):
+                            try:
+                                await channel.delete(reason="FET ANTI-NUKE: حذف روم سبام تم إنشاؤه أثناء هجوم تخريبي")
+                            except:
+                                pass
+                            await execute_nuke_defense(
+                                channel.guild,
+                                executor,
+                                "إنشاء رومات سبام بشكل جماعي (Mass Channel Create)",
+                                f"قام بإنشاء روم سبام `{channel.name}` وتجاوز الحد المسموح!"
+                            )
+                    break
+            except Exception as e:
+                logger.warning(f"Error in on_guild_channel_create security check: {e}")
+
+    @b.event
+    async def on_guild_role_delete(role: discord.Role):
+        cfg = load_config()
+        sec = cfg.get("security", {})
+        if sec.get("enabled", True) and sec.get("anti_role_delete", True):
+            try:
+                async for entry in role.guild.audit_logs(limit=1, action=discord.AuditLogAction.role_delete):
+                    executor = entry.user
+                    if executor and not is_whitelisted(executor, role.guild):
+                        now = datetime.datetime.now().timestamp()
+                        t_list = nuke_tracker.setdefault(executor.id, {}).setdefault("role_delete", [])
+                        t_list = [t for t in t_list if now - t < sec.get("nuke_window_seconds", 10)]
+                        t_list.append(now)
+                        nuke_tracker[executor.id]["role_delete"] = t_list
+
+                        if len(t_list) >= sec.get("nuke_threshold", 2):
+                            await execute_nuke_defense(
+                                role.guild,
+                                executor,
+                                "حذف الرتب بشكل جماعي (Mass Role Delete)",
+                                f"قام بحذف رتبة `{role.name}` وتجاوز الحد المسموح!"
+                            )
+                    break
+            except Exception as e:
+                logger.warning(f"Error in on_guild_role_delete security check: {e}")
+
+    @b.event
+    async def on_member_ban(guild: discord.Guild, user: discord.User):
+        cfg = load_config()
+        sec = cfg.get("security", {})
+        if sec.get("enabled", True) and sec.get("anti_mass_ban", True):
+            try:
+                async for entry in guild.audit_logs(limit=1, action=discord.AuditLogAction.ban):
+                    executor = entry.user
+                    if executor and not is_whitelisted(executor, guild):
+                        now = datetime.datetime.now().timestamp()
+                        t_list = nuke_tracker.setdefault(executor.id, {}).setdefault("mass_ban", [])
+                        t_list = [t for t in t_list if now - t < sec.get("nuke_window_seconds", 10)]
+                        t_list.append(now)
+                        nuke_tracker[executor.id]["mass_ban"] = t_list
+
+                        if len(t_list) >= sec.get("nuke_threshold", 2):
+                            await execute_nuke_defense(
+                                guild,
+                                executor,
+                                "تبنيد الأعضاء بشكل جماعي (Mass Ban Attack)",
+                                f"قام بتبنيد أعضاء السيرفر بشكل عشوائي وتجاوز الحد المسموح!"
+                            )
+                    break
+            except Exception as e:
+                logger.warning(f"Error in on_member_ban security check: {e}")
+
+    @b.event
+    async def on_member_remove(member: discord.Member):
+        cfg = load_config()
+        sec = cfg.get("security", {})
+        if sec.get("enabled", True) and sec.get("anti_mass_kick", True):
+            try:
+                async for entry in member.guild.audit_logs(limit=1, action=discord.AuditLogAction.kick):
+                    if entry.target and entry.target.id == member.id:
+                        executor = entry.user
+                        if executor and not is_whitelisted(executor, member.guild):
+                            now = datetime.datetime.now().timestamp()
+                            t_list = nuke_tracker.setdefault(executor.id, {}).setdefault("mass_kick", [])
+                            t_list = [t for t in t_list if now - t < sec.get("nuke_window_seconds", 10)]
+                            t_list.append(now)
+                            nuke_tracker[executor.id]["mass_kick"] = t_list
+
+                            if len(t_list) >= sec.get("nuke_threshold", 2):
+                                await execute_nuke_defense(
+                                    member.guild,
+                                    executor,
+                                    "طرد الأعضاء بشكل جماعي (Mass Kick Attack)",
+                                    f"قام بطرد أعضاء السيرفر وتجاوز الحد المسموح!"
+                                )
+                        break
+            except Exception as e:
+                pass
+
     @b.event
     async def on_ready():
         logger.info(f"Bot connected as {b.user} (ID: {b.user.id})")
@@ -979,8 +1432,27 @@ def setup_bot_handlers(b):
 
     @b.event
     async def on_member_join(member: discord.Member):
-        if member.bot:
+        # [[ Anti-Bot: Block Unauthorized Rogue Bots ]] #
+        cfg = load_config()
+        sec = cfg.get("security", {})
+        if member.bot and sec.get("enabled", True) and sec.get("anti_bot", True):
+            try:
+                async for entry in member.guild.audit_logs(limit=1, action=discord.AuditLogAction.bot_add):
+                    if entry.target and entry.target.id == member.id:
+                        inviter = entry.user
+                        if inviter and not is_whitelisted(inviter, member.guild):
+                            await member.kick(reason="FET ANTI-NUKE: بوت مشبوه تم إدخاله بواسطة عضو غير مصرح له")
+                            await execute_nuke_defense(
+                                member.guild,
+                                inviter,
+                                "إدخال بوتات مشبوهة غير مصرح بها (Unauthorized Bot Add)",
+                                f"قام بإدخال البوت المشبوه `{member.name}` بدون إذن المالك!"
+                            )
+                        break
+            except Exception as be:
+                logger.warning(f"Error checking bot_add audit log: {be}")
             return
+
         guild = member.guild
         cfg = load_config()
 
@@ -1467,6 +1939,10 @@ body { background-color:var(--bg-dark); color:var(--text-white); min-height:100v
                 <span class="nav-icon">📜</span>
                 <span class="nav-title">نشر القوانين (Rules)</span>
             </button>
+            <button class="nav-btn" data-tab="security-tab">
+                <span class="nav-icon">🛡️</span>
+                <span class="nav-title">الحماية والأمان (Anti-Nuke)</span>
+            </button>
             <button class="nav-btn" data-tab="admins-tab">
                 <span class="nav-icon">👥</span>
                 <span class="nav-title">المشرفين والأمان</span>
@@ -1745,7 +2221,44 @@ body { background-color:var(--bg-dark); color:var(--text-white); min-height:100v
                         </div>
                         <div class="form-group" style="display:flex; align-items:center; gap:8px;">
                             <input type="checkbox" id="rules-banner-checkbox" checked style="accent-color: var(--neon-green); width:18px; height:18px;">
-                            <label for="rules-banner-checkbox" style="margin:0; cursor:pointer;">إرفاق بنر سياسة المتجر الفخم (Rules Banner)</label>
+                            <label for="rules-banner-checkbox" style="margin:0; cursor:pointer;">إرفاق بنر سياسة المتجر (Rules Banner)</label>
+                        </div>
+
+                        <!-- Custom Rules Banner Upload Section -->
+                        <div class="form-group" style="border-top:1px solid rgba(16,216,74,0.15); padding-top:14px; margin-top:14px;">
+                            <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:8px;">
+                                <label style="margin:0; font-weight:700; color:var(--text-white);">🖼️ تخصيص وتحديد بنر السياسة والقوانين:</label>
+                                <span class="badge" id="rules-banner-status-badge" style="font-size:11px; padding:3px 8px; border:1px solid rgba(16,216,74,0.3); border-radius:6px; color:var(--neon-green); background:rgba(16,216,74,0.08);">البنر الافتراضي</span>
+                            </div>
+
+                            <div id="rules-banner-drop-zone" style="border: 2px dashed rgba(16,216,74,0.4); border-radius:12px; padding:18px; text-align:center; background:rgba(0,0,0,0.25); cursor:pointer; transition:all 0.25s ease;">
+                                <input type="file" id="rules-banner-file-input" accept="image/png,image/jpeg,image/webp,image/gif" style="display:none;">
+                                <div style="font-size:26px; margin-bottom:6px;">📤</div>
+                                <div style="font-weight:700; color:var(--text-white); font-size:13px;">اضغط هنا لاختيار صورة بنر القوانين من جهازك أو اسحبها هنا</div>
+                                <div style="font-size:11px; color:var(--text-muted); margin-top:4px;">يدعم PNG, JPG, WebP | المقاس الموصى به: 1920×1080 (16:9) أو 1200×600 (2:1)</div>
+                            </div>
+
+                            <div id="rules-banner-selected-info" class="hidden" style="margin-top:10px; padding:8px 12px; background:rgba(16,216,74,0.08); border-radius:8px; border:1px solid rgba(16,216,74,0.25); display:flex; align-items:center; justify-content:space-between; font-size:12px;">
+                                <div>
+                                    <span style="color:var(--neon-green); font-weight:700;">📁 تم اختيار: </span>
+                                    <span id="rules-banner-file-name" style="color:var(--text-white);"></span>
+                                </div>
+                                <span id="rules-banner-file-dim" style="color:var(--text-muted); font-family:var(--font-mono);"></span>
+                            </div>
+
+                            <div style="margin-top:10px;">
+                                <label style="font-size:12px; color:var(--text-muted);">أو رابط صورة بنر خارجي مباشر (Image URL):</label>
+                                <input type="text" id="rules-image-input" class="form-input" placeholder="https://.../rules_banner.png (اختياري)">
+                            </div>
+
+                            <div style="display:flex; gap:8px; margin-top:12px;">
+                                <button type="button" id="btn-save-rules-banner" class="btn-primary" style="flex:1; padding:9px 14px; font-size:13px; font-weight:700; opacity:0.6;" disabled>
+                                    <span>💾 حفظ واعتماد بنر السياسة</span>
+                                </button>
+                                <button type="button" id="btn-reset-rules-banner" class="btn-secondary" style="padding:9px 14px; font-size:13px; font-weight:700; border-color:rgba(255,50,50,0.5); color:#ff5555;">
+                                    <span>🔄 استعادة الافتراضي</span>
+                                </button>
+                            </div>
                         </div>
                         <button id="btn-send-rules" class="btn-primary">
                             <span>📜 نشر القوانين إلى الديسكورد فوراً</span>
@@ -1786,7 +2299,7 @@ body { background-color:var(--bg-dark); color:var(--text-white); min-height:100v
                                             <img src="/static/img/logo_circle.png" class="embed-thumbnail" onerror="this.src='/static/img/logo.png'" style="border-radius:50%; width:70px; height:70px;">
                                         </div>
                                         <div class="embed-banner-container" id="preview-rules-banner-container">
-                                            <img src="/static/img/rules_banner.png" class="embed-banner" onerror="this.src='/static/img/ticket_banner.png'">
+                                            <img id="preview-rules-banner" src="/static/img/rules_banner.png" class="embed-banner" onerror="this.src='/static/img/ticket_banner.png'">
                                         </div>
                                         <div class="embed-footer">
                                             <img src="/static/img/logo_circle.png" class="footer-icon" onerror="this.src='/static/img/logo.png'">
@@ -1794,6 +2307,165 @@ body { background-color:var(--bg-dark); color:var(--text-white); min-height:100v
                                         </div>
                                     </div>
                                 </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Tab: Security & Anti-Nuke -->
+            <section class="tab-pane" id="security-tab">
+                <div class="pane-grid">
+                    <div class="panel-card form-card">
+                        <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:14px; border-bottom:1px solid rgba(16,216,74,0.15); padding-bottom:12px;">
+                            <h2 class="card-title" style="margin:0;">🛡️ نظام الحماية ومكافحة الاختراق (Anti-Nuke)</h2>
+                            <span class="badge" id="sec-shield-status" style="border:1px solid #10d84a; color:#10d84a; background:rgba(16,216,74,0.1); padding:4px 10px; border-radius:20px; font-weight:800; font-size:12px;">⚡ نشط ومفعل 24/7</span>
+                        </div>
+
+                        <p style="color:var(--text-muted); font-size:13px; line-height:1.6; margin-bottom:16px;">
+                            نظام حماية رادع وسريع جداً مخصص لسيرفر <strong>FET STORE</strong> لصد محاولات التهكير، تغيير أو حذف الرومات، التخريب، وروابط الإعلانات فورياً.
+                        </p>
+
+                        <div style="display:flex; flex-direction:column; gap:12px; margin-bottom:20px;">
+                            <!-- Anti-Nuke Master -->
+                            <div style="display:flex; align-items:center; justify-content:space-between; background:rgba(0,0,0,0.25); padding:12px 16px; border-radius:10px; border:1px solid rgba(16,216,74,0.25);">
+                                <div>
+                                    <div style="font-weight:800; color:var(--neon-green); font-size:14px;">🛡️ الحماية القصوى من التخريب (Anti-Nuke Protection)</div>
+                                    <div style="font-size:12px; color:var(--text-muted);">رصد وحظر حذف وتعديل الرومات والرتب، ومنع تبنيد أو طرد الأعضاء عشوائياً</div>
+                                </div>
+                                <input type="checkbox" id="sec-anti-nuke" checked style="accent-color:var(--neon-green); width:22px; height:22px; cursor:pointer;">
+                            </div>
+
+                            <!-- Anti-Channel-Rename -->
+                            <div style="display:flex; align-items:center; justify-content:space-between; background:rgba(0,0,0,0.25); padding:12px 16px; border-radius:10px; border:1px solid rgba(16,216,74,0.25);">
+                                <div>
+                                    <div style="font-weight:800; color:var(--text-white); font-size:14px;">🔄 منع وتراجع فوري عن تغيير أسماء الرومات (Anti-Channel Rename)</div>
+                                    <div style="font-size:12px; color:var(--text-muted);">إذا حاول أي مخرب تغيير أسماء الرومات يُطرد فوراً ويُعاد اسم الروم الأصلي تلقائياً!</div>
+                                </div>
+                                <input type="checkbox" id="sec-anti-rename" checked style="accent-color:var(--neon-green); width:22px; height:22px; cursor:pointer;">
+                            </div>
+
+                            <!-- Anti-Discord-Invites -->
+                            <div style="display:flex; align-items:center; justify-content:space-between; background:rgba(0,0,0,0.25); padding:12px 16px; border-radius:10px; border:1px solid rgba(16,216,74,0.25);">
+                                <div>
+                                    <div style="font-weight:800; color:var(--text-white); font-size:14px;">🚫 حظر روابط الديسكورد والإعلانات (Anti-Discord Invites)</div>
+                                    <div style="font-size:12px; color:var(--text-muted);">حظر فوري لروابط discord.gg وإعلانات "حياكم الدس" مع مسح الرسالة وتايم أوت 30 دقيقة</div>
+                                </div>
+                                <input type="checkbox" id="sec-anti-invites" checked style="accent-color:var(--neon-green); width:22px; height:22px; cursor:pointer;">
+                            </div>
+
+                            <!-- Anti-External-Links -->
+                            <div style="display:flex; align-items:center; justify-content:space-between; background:rgba(0,0,0,0.25); padding:12px 16px; border-radius:10px; border:1px solid rgba(16,216,74,0.25);">
+                                <div>
+                                    <div style="font-weight:800; color:var(--text-white); font-size:14px;">🌐 حظر جميع الروابط الخارجية (Block All External Links)</div>
+                                    <div style="font-size:12px; color:var(--text-muted);">منع نشر أي رابط موقع خارجي في الشات لغير المشرفين والأونر</div>
+                                </div>
+                                <input type="checkbox" id="sec-anti-links" style="accent-color:var(--neon-green); width:22px; height:22px; cursor:pointer;">
+                            </div>
+
+                            <!-- Anti-Mass-Mention -->
+                            <div style="display:flex; align-items:center; justify-content:space-between; background:rgba(0,0,0,0.25); padding:12px 16px; border-radius:10px; border:1px solid rgba(16,216,74,0.25);">
+                                <div>
+                                    <div style="font-weight:800; color:var(--text-white); font-size:14px;">📢 منع المنشن الجماعي (Anti-Mass Mention)</div>
+                                    <div style="font-size:12px; color:var(--text-muted);">حظر ومسح أي رسالة تحتوي على منشن @everyone أو @here لغير الإدارة المصرح لها</div>
+                                </div>
+                                <input type="checkbox" id="sec-anti-mention" checked style="accent-color:var(--neon-green); width:22px; height:22px; cursor:pointer;">
+                            </div>
+
+                            <!-- Anti-Spam -->
+                            <div style="display:flex; align-items:center; justify-content:space-between; background:rgba(0,0,0,0.25); padding:12px 16px; border-radius:10px; border:1px solid rgba(16,216,74,0.25);">
+                                <div>
+                                    <div style="font-weight:800; color:var(--text-white); font-size:14px;">⚡ مكافحة السبام السريع (Anti-Spam Filter)</div>
+                                    <div style="font-size:12px; color:var(--text-muted);">كتم العضو ووضع تايم أوت تلقائياً عند إرسال أكثر من 5 رسائل في 3 ثواني</div>
+                                </div>
+                                <input type="checkbox" id="sec-anti-spam" checked style="accent-color:var(--neon-green); width:22px; height:22px; cursor:pointer;">
+                            </div>
+
+                            <!-- Anti-Rogue-Bots -->
+                            <div style="display:flex; align-items:center; justify-content:space-between; background:rgba(0,0,0,0.25); padding:12px 16px; border-radius:10px; border:1px solid rgba(16,216,74,0.25);">
+                                <div>
+                                    <div style="font-weight:800; color:var(--text-white); font-size:14px;">🤖 حظر البوتات المشبوهة (Anti-Rogue Bots)</div>
+                                    <div style="font-size:12px; color:var(--text-muted);">طرد أي بوت يتم إدخاله للسيرفر فوراً إذا لم يكن مدعواً من قِبل الأونر مباشرة</div>
+                                </div>
+                                <input type="checkbox" id="sec-anti-bot" checked style="accent-color:var(--neon-green); width:22px; height:22px; cursor:pointer;">
+                            </div>
+                        </div>
+
+                        <div style="display:grid; grid-template-columns:1fr 1fr; gap:14px; margin-bottom:16px;">
+                            <div class="form-group" style="margin:0;">
+                                <label>⚖️ الإجراء المتخذ عند رصد محاولة التخريب:</label>
+                                <select id="sec-action-select" class="form-input">
+                                    <option value="ban">⛔ باند نهائي وسحب كل الرتب فوراً (موصى به للأمان)</option>
+                                    <option value="kick">🚪 طرد من السيرفر وسحب الرتب</option>
+                                    <option value="timeout">⏳ تايم أوت وعزل لمدة 7 أيام</option>
+                                </select>
+                            </div>
+                            <div class="form-group" style="margin:0;">
+                                <label>🔢 حد التعديلات المسموح بها (Threshold):</label>
+                                <input type="number" id="sec-threshold-input" class="form-input" min="1" max="5" value="2">
+                                <span style="font-size:11px; color:var(--text-muted);">إذا قام الفاعل بأكثر من هذا العدد من الحذف أو التعديل في 10 ثواني يتم إعدام حسابه فوراً!</span>
+                            </div>
+                        </div>
+
+                        <div class="form-group">
+                            <label>📍 روم سجلات وتنبيهات الحماية (Security Logs Channel):</label>
+                            <select id="sec-log-channel-select" class="form-input">
+                                <option value="">-- اختر الروم لاستقبال تنبيهات الاختراق --</option>
+                            </select>
+                        </div>
+
+                        <div class="form-group">
+                            <label>👑 رتب القائمة البيضاء المستثناة من القيود (Whitelist Roles):</label>
+                            <select id="sec-whitelist-roles-select" class="form-input" multiple style="height:90px;">
+                            </select>
+                            <span style="font-size:11px; color:var(--text-muted);">ملاحظة: مالك السيرفر (Owner) وبوت FET STORE مستثنون دائماً وبشكل تلقائي.</span>
+                        </div>
+
+                        <div style="display:flex; gap:10px; margin-top:20px;">
+                            <button id="btn-save-security" class="btn-primary" style="flex:1;">
+                                <span>💾 حفظ وتفعيل نظام الحماية فوراً</span>
+                            </button>
+                            <button type="button" id="btn-test-security" class="btn-secondary" style="border-color:var(--neon-green); color:var(--neon-green); font-weight:800; padding:10px 18px;">
+                                <span>🧪 إرسال فحص تجريبي للديسكورد</span>
+                            </button>
+                        </div>
+                    </div>
+
+                    <div class="panel-card preview-card">
+                        <h2 class="card-title">🛡️ حالة درع الحماية والمراقبة المباشرة</h2>
+                        <div style="background:rgba(0,0,0,0.3); border:1px solid rgba(16,216,74,0.3); border-radius:12px; padding:20px;">
+                            <div style="display:flex; align-items:center; gap:14px; margin-bottom:18px;">
+                                <div style="width:50px; height:50px; border-radius:50%; background:rgba(16,216,74,0.15); border:2px solid var(--neon-green); display:flex; align-items:center; justify-content:center; font-size:24px;">
+                                    🛡️
+                                </div>
+                                <div>
+                                    <div style="font-weight:900; color:var(--neon-green); font-size:16px;">FET STORE ANTI-NUKE ACTIVE</div>
+                                    <div style="color:var(--text-white); font-size:13px;">نظام الحماية والردع المشفر شغال ومراقب لكل تحركات السيرفر</div>
+                                </div>
+                            </div>
+
+                            <div style="display:grid; grid-template-columns:1fr 1fr; gap:12px; margin-bottom:16px;">
+                                <div style="background:rgba(255,255,255,0.02); border:1px solid rgba(255,255,255,0.06); border-radius:8px; padding:12px;">
+                                    <div style="color:var(--text-muted); font-size:11px;">سرعة الاستجابة</div>
+                                    <div style="color:var(--neon-green); font-size:16px; font-weight:800; font-family:var(--font-mono);">⚡ 0.05 ثانية (فوري)</div>
+                                </div>
+                                <div style="background:rgba(255,255,255,0.02); border:1px solid rgba(255,255,255,0.06); border-radius:8px; padding:12px;">
+                                    <div style="color:var(--text-muted); font-size:11px;">مراقبة Audit Logs</div>
+                                    <div style="color:var(--neon-green); font-size:16px; font-weight:800;">🟢 مراقبة لايف 24/7</div>
+                                </div>
+                                <div style="background:rgba(255,255,255,0.02); border:1px solid rgba(255,255,255,0.06); border-radius:8px; padding:12px;">
+                                    <div style="color:var(--text-muted); font-size:11px;">حماية الرومات</div>
+                                    <div style="color:var(--text-white); font-size:14px; font-weight:700;">✅ منع الحذف + استرجاع الأسماء</div>
+                                </div>
+                                <div style="background:rgba(255,255,255,0.02); border:1px solid rgba(255,255,255,0.06); border-radius:8px; padding:12px;">
+                                    <div style="color:var(--text-muted); font-size:11px;">ردع الإعلانات</div>
+                                    <div style="color:var(--text-white); font-size:14px; font-weight:700;">✅ حظر discord.gg فوري</div>
+                                </div>
+                            </div>
+
+                            <div style="padding:12px; background:rgba(16,216,74,0.06); border:1px dashed rgba(16,216,74,0.3); border-radius:8px; font-size:12px; color:var(--text-muted); line-height:1.6;">
+                                💡 <strong>نصيحة أمنية هامة:</strong><br>
+                                تأكد دائماً أن رتبة بوت <strong>FET STORE</strong> أعلى في قائمة الرتب (Roles Hierarchy) من أي رتبة إدارية أخرى، حتى يمتلك البوت الصلاحية الكاملة لسحب الرتب وتبنيد أي حساب مخترق فوراً وبدون عوائق.
                             </div>
                         </div>
                     </div>
@@ -2141,6 +2813,24 @@ async function loadStatus() {
             }
         }
 
+        if (!pendingRulesBannerDataUrl) {
+            const previewRulesBanner = safeElem('preview-rules-banner');
+            const rulesBannerStatusBadge = safeElem('rules-banner-status-badge');
+            if (data.has_custom_rules_banner) {
+                if (previewRulesBanner) previewRulesBanner.src = '/static/img/custom_rules_banner.png?v=' + Date.now();
+                if (rulesBannerStatusBadge) {
+                    rulesBannerStatusBadge.innerText = '✅ بنر مخصص مفعل';
+                    rulesBannerStatusBadge.style.borderColor = 'rgba(16,216,74,0.6)';
+                }
+            } else {
+                if (previewRulesBanner) previewRulesBanner.src = '/static/img/rules_banner.png';
+                if (rulesBannerStatusBadge) {
+                    rulesBannerStatusBadge.innerText = 'البنر الافتراضي';
+                    rulesBannerStatusBadge.style.borderColor = 'rgba(16,216,74,0.3)';
+                }
+            }
+        }
+
         if (currentConfig.token && safeElem('token-input')) {
             safeElem('token-input').value = currentConfig.token;
         }
@@ -2203,6 +2893,8 @@ function populateDropdowns(guilds) {
     const inviteAnnounceSelect = safeElem('invite-announce-channel-select');
     const categorySelect = safeElem('ticket-category-select');
     const closedCategorySelect = safeElem('closed-category-select');
+    const secLogSelect = safeElem('sec-log-channel-select');
+    const secWlRolesSelect = safeElem('sec-whitelist-roles-select');
 
     if (ticketChannelSelect) ticketChannelSelect.innerHTML = '<option value="">-- اختر الروم من سيرفرك --</option>';
     if (updateChannelSelect) updateChannelSelect.innerHTML = '<option value="">-- اختر الروم --</option>';
@@ -2214,6 +2906,8 @@ function populateDropdowns(guilds) {
     if (inviteAnnounceSelect) inviteAnnounceSelect.innerHTML = '<option value="">-- اختر روم الإعلان أو اتركه فارغاً --</option>';
     if (categorySelect) categorySelect.innerHTML = '<option value="">-- اختر قسم التكتات الفعالة --</option>';
     if (closedCategorySelect) closedCategorySelect.innerHTML = '<option value="">-- اختر قسم التكتات المغلقة --</option>';
+    if (secLogSelect) secLogSelect.innerHTML = '<option value="">-- اختر الروم لاستقبال تنبيهات الاختراق --</option>';
+    if (secWlRolesSelect) secWlRolesSelect.innerHTML = '';
 
     guilds.forEach(g => {
         if (g.channels) {
@@ -2223,6 +2917,7 @@ function populateDropdowns(guilds) {
                 if (rulesChannelSelect) rulesChannelSelect.add(new Option(`# ${ch.name} (${g.name})`, ch.id));
                 if (reviewsChannelSelect) reviewsChannelSelect.add(new Option(`# ${ch.name} (${g.name})`, ch.id));
                 if (inviteAnnounceSelect) inviteAnnounceSelect.add(new Option(`# ${ch.name} (${g.name})`, ch.id));
+                if (secLogSelect) secLogSelect.add(new Option(`# ${ch.name} (${g.name})`, ch.id));
             });
         }
         if (g.roles) {
@@ -2230,6 +2925,7 @@ function populateDropdowns(guilds) {
                 if (staffRoleSelect) staffRoleSelect.add(new Option(`@${r.name}`, r.id));
                 if (autoRoleSelect) autoRoleSelect.add(new Option(`@${r.name}`, r.id));
                 if (inviteRewardRoleSelect) inviteRewardRoleSelect.add(new Option(`@${r.name}`, r.id));
+                if (secWlRolesSelect) secWlRolesSelect.add(new Option(`@${r.name}`, r.id));
             });
         }
         if (g.categories) {
@@ -2248,6 +2944,25 @@ function populateDropdowns(guilds) {
     if (currentConfig.invite_announce_channel_id && inviteAnnounceSelect) inviteAnnounceSelect.value = currentConfig.invite_announce_channel_id;
     if (currentConfig.ticket_category_id && categorySelect) categorySelect.value = currentConfig.ticket_category_id;
     if (currentConfig.closed_category_id && closedCategorySelect) closedCategorySelect.value = currentConfig.closed_category_id;
+
+    if (currentConfig.security) {
+        const s = currentConfig.security;
+        if (safeElem('sec-anti-nuke')) safeElem('sec-anti-nuke').checked = s.anti_nuke !== false;
+        if (safeElem('sec-anti-rename')) safeElem('sec-anti-rename').checked = s.anti_channel_rename !== false;
+        if (safeElem('sec-anti-invites')) safeElem('sec-anti-invites').checked = s.anti_invites !== false;
+        if (safeElem('sec-anti-links')) safeElem('sec-anti-links').checked = !!s.anti_links;
+        if (safeElem('sec-anti-mention')) safeElem('sec-anti-mention').checked = s.anti_mass_mention !== false;
+        if (safeElem('sec-anti-spam')) safeElem('sec-anti-spam').checked = s.anti_spam !== false;
+        if (safeElem('sec-anti-bot')) safeElem('sec-anti-bot').checked = s.anti_bot !== false;
+        if (safeElem('sec-action-select') && s.nuke_action) safeElem('sec-action-select').value = s.nuke_action;
+        if (safeElem('sec-threshold-input') && s.nuke_threshold) safeElem('sec-threshold-input').value = s.nuke_threshold;
+        if (secLogSelect && s.log_channel_id) secLogSelect.value = s.log_channel_id;
+        if (secWlRolesSelect && Array.isArray(s.whitelist_roles)) {
+            for (let opt of secWlRolesSelect.options) {
+                opt.selected = s.whitelist_roles.includes(opt.value);
+            }
+        }
+    }
 
     if (currentConfig.reviews_channel_id && reviewsChannelSelect) {
         reviewsChannelSelect.value = currentConfig.reviews_channel_id;
@@ -2593,6 +3308,168 @@ if (btnSendUpdate) {
     });
 }
 
+// [[ Custom Rules Banner Drag & Drop & Upload ]] //
+let pendingRulesBannerDataUrl = null;
+const rulesBannerDropZone = safeElem('rules-banner-drop-zone');
+const rulesBannerFileInput = safeElem('rules-banner-file-input');
+const rulesImageInput = safeElem('rules-image-input');
+const btnSaveRulesBanner = safeElem('btn-save-rules-banner');
+const btnResetRulesBanner = safeElem('btn-reset-rules-banner');
+const previewRulesBanner = safeElem('preview-rules-banner');
+const rulesBannerStatusBadge = safeElem('rules-banner-status-badge');
+const rulesBannerSelectedInfo = safeElem('rules-banner-selected-info');
+const rulesBannerFileName = safeElem('rules-banner-file-name');
+const rulesBannerFileDim = safeElem('rules-banner-file-dim');
+
+function handleRulesBannerFile(file) {
+    if (!file || !file.type.startsWith('image/')) {
+        showToast('⚠️ يرجى اختيار ملف صورة صالح (PNG / JPG / WebP / GIF)!');
+        return;
+    }
+    if (file.size > 8 * 1024 * 1024) {
+        showToast('⚠️ حجم الصورة أكبر من 8 ميجابايت!');
+        return;
+    }
+
+    const reader = new FileReader();
+    reader.onload = (e) => {
+        pendingRulesBannerDataUrl = e.target.result;
+        if (previewRulesBanner) {
+            previewRulesBanner.src = pendingRulesBannerDataUrl;
+        }
+
+        const img = new Image();
+        img.onload = () => {
+            const w = img.naturalWidth;
+            const h = img.naturalHeight;
+            let ratioNote = '';
+            if (Math.abs(w / h - 16 / 9) < 0.1) {
+                ratioNote = ' (نسبة 16:9 مضبوطة 100%! 🎯)';
+            } else if (Math.abs(w / h - 2 / 1) < 0.1) {
+                ratioNote = ' (نسبة 2:1 ممتازة 👍)';
+            }
+            if (rulesBannerSelectedInfo) rulesBannerSelectedInfo.classList.remove('hidden');
+            if (rulesBannerFileName) rulesBannerFileName.innerText = file.name;
+            if (rulesBannerFileDim) rulesBannerFileDim.innerText = `[${w} × ${h} بكسل]${ratioNote}`;
+        };
+        img.src = pendingRulesBannerDataUrl;
+
+        if (btnSaveRulesBanner) {
+            btnSaveRulesBanner.disabled = false;
+            btnSaveRulesBanner.style.opacity = '1';
+        }
+        showToast('👁️ تم تحديث معاينة بنر القوانين! اضغط "حفظ واعتماد بنر السياسة" لتثبيته.');
+    };
+    reader.readAsDataURL(file);
+}
+
+if (rulesBannerDropZone && rulesBannerFileInput) {
+    rulesBannerDropZone.addEventListener('click', () => {
+        rulesBannerFileInput.click();
+    });
+
+    rulesBannerDropZone.addEventListener('dragover', (e) => {
+        e.preventDefault();
+        rulesBannerDropZone.style.borderColor = 'var(--neon-green)';
+        rulesBannerDropZone.style.background = 'rgba(16,216,74,0.12)';
+    });
+
+    rulesBannerDropZone.addEventListener('dragleave', () => {
+        rulesBannerDropZone.style.borderColor = 'rgba(16,216,74,0.4)';
+        rulesBannerDropZone.style.background = 'rgba(0,0,0,0.25)';
+    });
+
+    rulesBannerDropZone.addEventListener('drop', (e) => {
+        e.preventDefault();
+        rulesBannerDropZone.style.borderColor = 'rgba(16,216,74,0.4)';
+        rulesBannerDropZone.style.background = 'rgba(0,0,0,0.25)';
+        if (e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files.length > 0) {
+            handleRulesBannerFile(e.dataTransfer.files[0]);
+        }
+    });
+
+    rulesBannerFileInput.addEventListener('change', (e) => {
+        if (e.target.files && e.target.files.length > 0) {
+            handleRulesBannerFile(e.target.files[0]);
+        }
+    });
+}
+
+if (rulesImageInput) {
+    rulesImageInput.addEventListener('input', () => {
+        const url = rulesImageInput.value.trim();
+        if (url && previewRulesBanner) {
+            previewRulesBanner.src = url;
+            if (rulesBannerStatusBadge) {
+                rulesBannerStatusBadge.innerText = '🔗 رابط خارجي مخصص';
+                rulesBannerStatusBadge.style.borderColor = 'rgba(16,216,74,0.6)';
+            }
+        }
+    });
+}
+
+if (btnSaveRulesBanner) {
+    btnSaveRulesBanner.addEventListener('click', async () => {
+        if (!pendingRulesBannerDataUrl) {
+            return showToast('⚠️ يرجى اختيار صورة بنر القوانين أولاً!');
+        }
+        try {
+            showToast('⏳ جاري رفع وحفظ بنر السياسة الجديد...');
+            const res = await fetch('/api/rules/banner/upload', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ image_b64: pendingRulesBannerDataUrl })
+            });
+            const result = await res.json();
+            if (result.status === 'ok') {
+                showToast('✅ تم حفظ بنر السياسة الجديد بنجاح واعتماده في رسائل القوانين!');
+                if (rulesBannerStatusBadge) {
+                    rulesBannerStatusBadge.innerText = '✅ بنر مخصص مفعل';
+                    rulesBannerStatusBadge.style.borderColor = 'rgba(16,216,74,0.6)';
+                }
+                btnSaveRulesBanner.disabled = true;
+                btnSaveRulesBanner.style.opacity = '0.6';
+            } else {
+                showToast('❌ خطأ: ' + result.message);
+            }
+        } catch (e) {
+            showToast('❌ تعذر رفع البنر: ' + e.message);
+        }
+    });
+}
+
+if (btnResetRulesBanner) {
+    btnResetRulesBanner.addEventListener('click', async () => {
+        try {
+            showToast('⏳ جاري استعادة بنر السياسة الافتراضي...');
+            const res = await fetch('/api/rules/banner/reset', { method: 'POST' });
+            const result = await res.json();
+            if (result.status === 'ok') {
+                showToast('✅ تمت استعادة بنر السياسة الافتراضي بنجاح!');
+                pendingRulesBannerDataUrl = null;
+                if (previewRulesBanner) {
+                    previewRulesBanner.src = '/static/img/rules_banner.png?v=' + Date.now();
+                }
+                if (rulesBannerStatusBadge) {
+                    rulesBannerStatusBadge.innerText = 'البنر الافتراضي';
+                    rulesBannerStatusBadge.style.borderColor = 'rgba(16,216,74,0.3)';
+                }
+                if (rulesBannerSelectedInfo) rulesBannerSelectedInfo.classList.add('hidden');
+                if (rulesBannerFileInput) rulesBannerFileInput.value = '';
+                if (rulesImageInput) rulesImageInput.value = '';
+                if (btnSaveRulesBanner) {
+                    btnSaveRulesBanner.disabled = true;
+                    btnSaveRulesBanner.style.opacity = '0.6';
+                }
+            } else {
+                showToast('❌ خطأ: ' + result.message);
+            }
+        } catch (e) {
+            showToast('❌ خطأ: ' + e.message);
+        }
+    });
+}
+
 const btnSendRules = safeElem('btn-send-rules');
 if (btnSendRules) {
     btnSendRules.addEventListener('click', async () => {
@@ -2603,8 +3480,9 @@ if (btnSendRules) {
         const rulesText = rulesTextInput ? rulesTextInput.value.trim() : '';
         const color = rulesColorInput ? rulesColorInput.value : '#10d84a';
         const includeBanner = rulesBannerCheckbox ? rulesBannerCheckbox.checked : true;
+        const imageUrl = rulesImageInput ? rulesImageInput.value.trim() : '';
         if (!channelId || !rulesText) return showToast('⚠️ يرجى اختيار الروم وكتابة بنود القوانين!');
-        const payload = { channel_id: channelId, title: title, subtitle: subtitle, rules_text: rulesText, color: color, include_banner: includeBanner };
+        const payload = { channel_id: channelId, title: title, subtitle: subtitle, rules_text: rulesText, color: color, include_banner: includeBanner, image_url: imageUrl };
         try {
             showToast('⏳ جاري نشر القوانين في الديسكورد...');
             const res = await fetch('/api/rules/send', {
@@ -2613,10 +3491,91 @@ if (btnSendRules) {
                 body: JSON.stringify(payload)
             });
             const result = await res.json();
-            if (result.status === 'ok') showToast('✅ تم نشر القوانين بنجاح مع بنر السياسة الجديد!');
+            if (result.status === 'ok') showToast('✅ تم نشر القوانين بنجاح مع بنر السياسة المخصص!');
             else showToast('❌ خطأ: ' + result.message);
         } catch (e) {
             showToast('❌ تعذر النشر: ' + e.message);
+        }
+    });
+}
+
+// [[ Anti-Nuke & Security Tab Handlers ]] //
+const btnSaveSecurity = safeElem('btn-save-security');
+if (btnSaveSecurity) {
+    btnSaveSecurity.addEventListener('click', async () => {
+        const antiNuke = safeElem('sec-anti-nuke')?.checked ?? true;
+        const antiRename = safeElem('sec-anti-rename')?.checked ?? true;
+        const antiInvites = safeElem('sec-anti-invites')?.checked ?? true;
+        const antiLinks = safeElem('sec-anti-links')?.checked ?? false;
+        const antiMention = safeElem('sec-anti-mention')?.checked ?? true;
+        const antiSpam = safeElem('sec-anti-spam')?.checked ?? true;
+        const antiBot = safeElem('sec-anti-bot')?.checked ?? true;
+        const nukeAction = safeElem('sec-action-select')?.value || 'ban';
+        const threshold = parseInt(safeElem('sec-threshold-input')?.value || 2) || 2;
+        const logChannel = safeElem('sec-log-channel-select')?.value || '';
+        
+        const wlSelect = safeElem('sec-whitelist-roles-select');
+        const selectedRoles = [];
+        if (wlSelect) {
+            for (let opt of wlSelect.selectedOptions) {
+                selectedRoles.push(opt.value);
+            }
+        }
+
+        const secPayload = {
+            enabled: true,
+            anti_nuke: antiNuke,
+            anti_channel_rename: antiRename,
+            anti_channel_delete: antiNuke,
+            anti_channel_create: antiNuke,
+            anti_role_delete: antiNuke,
+            anti_role_edit: antiNuke,
+            anti_mass_ban: antiNuke,
+            anti_mass_kick: antiNuke,
+            anti_invites: antiInvites,
+            anti_links: antiLinks,
+            anti_mass_mention: antiMention,
+            anti_spam: antiSpam,
+            anti_bot: antiBot,
+            nuke_action: nukeAction,
+            nuke_threshold: threshold,
+            log_channel_id: logChannel,
+            whitelist_roles: selectedRoles
+        };
+
+        try {
+            showToast('🛡️ جاري حفظ وتفعيل نظام الحماية...');
+            const res = await fetch('/api/security/save', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(secPayload)
+            });
+            const result = await res.json();
+            if (result.status === 'ok') {
+                showToast('✅ تم حفظ وتفعيل إعدادات الحماية والأمان بنجاح!');
+            } else {
+                showToast('❌ خطأ: ' + result.message);
+            }
+        } catch (e) {
+            showToast('❌ خطأ: ' + e.message);
+        }
+    });
+}
+
+const btnTestSecurity = safeElem('btn-test-security');
+if (btnTestSecurity) {
+    btnTestSecurity.addEventListener('click', async () => {
+        try {
+            showToast('⏳ جاري إرسال فحص تجريبي لروم سجلات الحماية بالديسكورد...');
+            const res = await fetch('/api/security/test', { method: 'POST' });
+            const result = await res.json();
+            if (result.status === 'ok') {
+                showToast(result.message);
+            } else {
+                showToast('❌ خطأ: ' + result.message);
+            }
+        } catch (e) {
+            showToast('❌ تعذر إرسال الفحص: ' + e.message);
         }
     });
 }
